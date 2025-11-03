@@ -1,0 +1,230 @@
+   0.330154000s  INFO prepare_target{force=false package_id=canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri) target="canon_raw_media_manager_lib"}: cargo::core::compiler::fingerprint: fingerprint error for canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri)/Check { test: false }/TargetInner { ..: lib_target("canon_raw_media_manager_lib", ["staticlib", "cdylib", "rlib"], "/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/src/lib.rs", Edition2021) }
+   0.330379500s  INFO prepare_target{force=false package_id=canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri) target="canon_raw_media_manager_lib"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/target/debug/.fingerprint/canon-raw-media-manager-df85dac8443722d9/lib-canon_raw_media_manager_lib`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.391856667s  INFO prepare_target{force=false package_id=tauri v2.9.2 target="tauri"}: cargo::core::compiler::fingerprint: fingerprint error for tauri v2.9.2/Check { test: false }/TargetInner { ..: lib_target("tauri", ["lib"], "/Users/hikarihui/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-2.9.2/src/lib.rs", Edition2021) }
+   0.391871625s  INFO prepare_target{force=false package_id=tauri v2.9.2 target="tauri"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/target/debug/.fingerprint/tauri-0ddf7c8d9da52f39/lib-tauri`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+   0.398184250s  INFO prepare_target{force=false package_id=http-range v0.1.5 target="http_range"}: cargo::core::compiler::fingerprint: fingerprint error for http-range v0.1.5/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("http_range", ["lib"], "/Users/hikarihui/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/http-range-0.1.5/src/lib.rs", Edition2018) }
+   0.398199167s  INFO prepare_target{force=false package_id=http-range v0.1.5 target="http_range"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/target/debug/.fingerprint/http-range-d6b45edf71fdfdfd/lib-http_range`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: cargo::core::compiler::compile
+   7: cargo::core::compiler::compile
+   8: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   9: cargo::ops::cargo_compile::compile_ws
+  10: cargo::ops::cargo_compile::compile_with_exec
+  11: cargo::ops::cargo_compile::compile
+  12: cargo::commands::check::exec
+  13: <cargo::cli::Exec>::exec
+  14: cargo::main
+  15: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  16: std::rt::lang_start::<()>::{closure#0}
+  17: std::rt::lang_start_internal
+  18: _main
+   0.417361292s  INFO prepare_target{force=false package_id=tauri-plugin-dialog v2.4.2 target="tauri_plugin_dialog"}: cargo::core::compiler::fingerprint: fingerprint error for tauri-plugin-dialog v2.4.2/Check { test: false }/TargetInner { ..: lib_target("tauri_plugin_dialog", ["lib"], "/Users/hikarihui/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.4.2/src/lib.rs", Edition2021) }
+   0.417374500s  INFO prepare_target{force=false package_id=tauri-plugin-dialog v2.4.2 target="tauri_plugin_dialog"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/target/debug/.fingerprint/tauri-plugin-dialog-202fe7303a3668ec/lib-tauri_plugin_dialog`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+   0.419050292s  INFO prepare_target{force=false package_id=tauri-plugin-fs v2.4.4 target="tauri_plugin_fs"}: cargo::core::compiler::fingerprint: fingerprint error for tauri-plugin-fs v2.4.4/Check { test: false }/TargetInner { ..: lib_target("tauri_plugin_fs", ["lib"], "/Users/hikarihui/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-fs-2.4.4/src/lib.rs", Edition2021) }
+   0.419056459s  INFO prepare_target{force=false package_id=tauri-plugin-fs v2.4.4 target="tauri_plugin_fs"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/target/debug/.fingerprint/tauri-plugin-fs-5cfbf315e178f7f1/lib-tauri_plugin_fs`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: cargo::core::compiler::compile
+   7: cargo::core::compiler::compile
+   8: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   9: cargo::ops::cargo_compile::compile_ws
+  10: cargo::ops::cargo_compile::compile_with_exec
+  11: cargo::ops::cargo_compile::compile
+  12: cargo::commands::check::exec
+  13: <cargo::cli::Exec>::exec
+  14: cargo::main
+  15: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  16: std::rt::lang_start::<()>::{closure#0}
+  17: std::rt::lang_start_internal
+  18: _main
+   0.420097125s  INFO prepare_target{force=false package_id=tauri-plugin-opener v2.5.2 target="tauri_plugin_opener"}: cargo::core::compiler::fingerprint: fingerprint error for tauri-plugin-opener v2.5.2/Check { test: false }/TargetInner { ..: lib_target("tauri_plugin_opener", ["lib"], "/Users/hikarihui/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-opener-2.5.2/src/lib.rs", Edition2021) }
+   0.420102917s  INFO prepare_target{force=false package_id=tauri-plugin-opener v2.5.2 target="tauri_plugin_opener"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/target/debug/.fingerprint/tauri-plugin-opener-2e644365402476e3/lib-tauri_plugin_opener`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+   0.421619709s  INFO prepare_target{force=false package_id=canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri) target="canon_raw_media_manager_lib"}: cargo::core::compiler::fingerprint: fingerprint error for canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri)/Check { test: true }/TargetInner { ..: lib_target("canon_raw_media_manager_lib", ["staticlib", "cdylib", "rlib"], "/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/src/lib.rs", Edition2021) }
+   0.421630167s  INFO prepare_target{force=false package_id=canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri) target="canon_raw_media_manager_lib"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/target/debug/.fingerprint/canon-raw-media-manager-62a1a783ca72b3f9/test-lib-canon_raw_media_manager_lib`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.422689917s  INFO prepare_target{force=false package_id=canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri) target="canon-raw-media-manager"}: cargo::core::compiler::fingerprint: fingerprint error for canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri)/Check { test: false }/TargetInner { name: "canon-raw-media-manager", doc: true, ..: with_path("/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/src/main.rs", Edition2021) }
+   0.422696334s  INFO prepare_target{force=false package_id=canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri) target="canon-raw-media-manager"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/target/debug/.fingerprint/canon-raw-media-manager-9f4acfe149813978/bin-canon-raw-media-manager`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.423798334s  INFO prepare_target{force=false package_id=canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri) target="canon-raw-media-manager"}: cargo::core::compiler::fingerprint: fingerprint error for canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri)/Check { test: true }/TargetInner { name: "canon-raw-media-manager", doc: true, ..: with_path("/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/src/main.rs", Edition2021) }
+   0.423804625s  INFO prepare_target{force=false package_id=canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri) target="canon-raw-media-manager"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri/target/debug/.fingerprint/canon-raw-media-manager-822d5cbd0794fea9/test-bin-canon-raw-media-manager`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+    Checking http-range v0.1.5
+    Checking tauri v2.9.2
+    Checking tauri-plugin-fs v2.4.4
+    Checking tauri-plugin-opener v2.5.2
+    Checking tauri-plugin-dialog v2.4.2
+    Checking canon-raw-media-manager v0.1.0 (/Users/hikarihui/Documents/code/hui/canon-raw-media-manager/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.67s
