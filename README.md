@@ -1,7 +1,8 @@
-# Tauri + Vue + TypeScript
+# 佳能 raw 视频管理工具
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+基于拍摄时录制 raw（4通道音频）+ proxy（2通道音频）情况下，素材文件管理麻烦这样小众而又蛋疼的场景而开发的管理工具。
 
-## Recommended IDE Setup
+## 功能
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- 自动映射 raw 和 proxy，同步删除文件
+- 转换 proxy（2通道音频）至 4 通道音频（解决 pr 在音频通道数量不符的情况下不支持连接代理文件的问题）
