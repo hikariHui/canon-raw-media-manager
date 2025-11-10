@@ -17,7 +17,9 @@ pub fn run() {
             fs::watch_directory,
             fs::unwatch_directory,
             fs::list_watching_directories,
-            ffmpeg::convert_proxy_to_4ch
+            fs::move_file,
+            ffmpeg::convert_proxy_to_4ch,
+            ffmpeg::get_video_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

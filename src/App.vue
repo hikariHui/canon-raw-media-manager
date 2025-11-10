@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { open } from "@tauri-apps/plugin-dialog";
-import { NButton, NLayout, NLayoutSider, NLayoutContent } from "naive-ui";
+import { NButton, NLayout, NLayoutSider, NLayoutContent, NFlex } from "naive-ui";
 
-import { rawDir } from "./hooks/useRawFile";
-import { proxyDir } from "./hooks/useProxyFile";
+import { rawDir, curCrmFile } from "./hooks/useRawFile";
+import { proxyDir, curProxyFilePath } from "./hooks/useProxyFile";
 
 import VideoList from "./components/VideoList.vue";
 import PorxyPreview from "./components/PorxyPreview.vue";
+import VideoInfo from "./components/VideoInfo.vue";
 
 const dirValMap = {
   rawDir,
@@ -38,6 +39,10 @@ const chooseDir = async (targetValue: "rawDir" | "proxyDir") => {
     <NLayout>
       <NLayoutContent>
         <PorxyPreview />
+        <NFlex>
+          <VideoInfo :video-path="curCrmFile" />
+          <VideoInfo :video-path="curProxyFilePath" />
+        </NFlex>
       </NLayoutContent>
     </NLayout>
   </NLayout>
