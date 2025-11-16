@@ -28,7 +28,7 @@ const chooseDir = async (targetValue: "rawDir" | "proxyDir") => {
 </script>
 
 <template>
-  <NLayout has-sider>
+  <NLayout style="max-height: 100vh;" position="absolute" has-sider>
     <NLayoutSider>
       <NButton @click="chooseDir('rawDir')">Choose Raw Dir</NButton>
       <p>{{ rawDir }}</p>
