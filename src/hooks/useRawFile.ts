@@ -21,7 +21,7 @@ const readDirectoryFiles = async () => {
     const files: string[] = await invoke("read_directory_files", {
       dirPath: rawDir.value,
     });
-    filesList.value = files.filter(file => file.toLowerCase().endsWith(".crm"));
+    filesList.value = files.filter(file => file.toLowerCase().endsWith(".crm") || file.toLowerCase().endsWith(".mp4"));
   }, 300);
 };
 
