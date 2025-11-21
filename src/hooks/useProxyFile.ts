@@ -37,10 +37,8 @@ watch([curCrmFile, proxyDir], async ([crmPath]) => {
   if (isExists) {
     curProxyFileUrl.value = convertFileSrc(proxyPath);
     curProxyFilePath.value = proxyPath;
-    console.log("file exists");
   } else {
     curProxyFileUrl.value = "";
     curProxyFilePath.value = "";
-    console.log("file not exists");
   }
 });

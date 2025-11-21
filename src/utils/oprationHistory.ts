@@ -19,7 +19,6 @@ const history: Operation[][] = [];
 /** 添加操作历史记录 */
 export const addHistory = (method: Operation[]) => {
   history.push(method);
-  console.log("history", history);
 };
 
 /** 撤销操作 */
