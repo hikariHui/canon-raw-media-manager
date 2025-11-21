@@ -9,8 +9,8 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 const isPlaying = ref(false);
 
 onMounted(() => {
-  // 监听空格键播放/暂停视频
   window.addEventListener("keydown", (event) => {
+    // 监听空格键播放/暂停视频
     if (event.key === " ") {
       event.preventDefault();
       if (videoRef.value) {
@@ -21,6 +21,19 @@ onMounted(() => {
           videoRef.value.pause();
           isPlaying.value = false;
         }
+      }
+    }
+    // 左右箭头快进/后退5秒
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (videoRef.value) {
+        videoRef.value.currentTime += 5;
+      }
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (videoRef.value) {
+        videoRef.value.currentTime -= 5;
       }
     }
   });
