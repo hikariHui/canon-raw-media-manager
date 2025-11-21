@@ -12,6 +12,7 @@ const onBlur = () => {
 };
 
 onMounted(() => {
+  isFoucsed.value = document.hasFocus();
   window.addEventListener("focus", onFocus);
   window.addEventListener("blur", onBlur);
 });
