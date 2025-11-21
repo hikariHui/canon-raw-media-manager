@@ -202,22 +202,25 @@ pub fn move_file(
     // 确保目标目录存在
     if let Some(parent) = destination.parent() {
         if !parent.exists() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建目标目录失败: {}", e))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败: {}", e))?;
         }
     }
 
     // 尝试使用 rename（快速，但可能跨文件系统失败）
     match std::fs::rename(&source, &destination) {
-        Ok(_) => Ok(format!("文件移动成功: {} -> {}", source_path, destination_path)),
+        Ok(_) => Ok(format!(
+            "文件移动成功: {} -> {}",
+            source_path, destination_path
+        )),
         Err(e) => {
             // 如果 rename 失败（通常是跨文件系统），使用 copy + remove
             if e.raw_os_error() == Some(18) || e.kind() == std::io::ErrorKind::CrossesDevices {
-                std::fs::copy(&source, &destination)
-                    .map_err(|e| format!("复制文件失败: {}", e))?;
-                std::fs::remove_file(&source)
-                    .map_err(|e| format!("删除源文件失败: {}", e))?;
-                Ok(format!("文件移动成功（跨文件系统）: {} -> {}", source_path, destination_path))
+                std::fs::copy(&source, &destination).map_err(|e| format!("复制文件失败: {}", e))?;
+                std::fs::remove_file(&source).map_err(|e| format!("删除源文件失败: {}", e))?;
+                Ok(format!(
+                    "文件移动成功（跨文件系统）: {} -> {}",
+                    source_path, destination_path
+                ))
             } else {
                 Err(format!("移动文件失败: {}", e))
             }

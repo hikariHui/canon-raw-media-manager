@@ -1,12 +1,18 @@
 import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { store } from "../utils/store";
 
 /** 当前选中的 raw 文件 */
 export const curCrmFile = ref("");
 
 /** raw 文件目录路径 */
-export const rawDir = ref("");
+export const rawDir = ref((await store.get<string>("rawDir")) || "");
+
+// 监听 rawDir 变化，保存到 store 中
+watch(rawDir, async (newDir) => {
+  await store.set("rawDir", newDir);
+});
 
 /** raw 文件列表 */
 export const filesList = ref<string[]>([]);
@@ -30,7 +36,7 @@ const readDirectoryFiles = async () => {
 };
 
 /** 监听目录变化 */
-const watchDirectory = async (newVal: string, oldVal: string) => {
+const watchDirectory = async (newVal: string, oldVal?: string) => {
   try {
     if (oldVal) {
       await invoke("unwatch_directory", { dirPath: oldVal });
@@ -43,10 +49,14 @@ const watchDirectory = async (newVal: string, oldVal: string) => {
 };
 
 // 监听 raw 文件目录变化
-watch(rawDir, (newVal, oldVal) => {
-  readDirectoryFiles();
-  watchDirectory(newVal, oldVal);
-});
+watch(
+  rawDir,
+  (newVal, oldVal) => {
+    readDirectoryFiles();
+    watchDirectory(newVal, oldVal);
+  },
+  { immediate: true },
+);
 
 // 监听文件变化
 listen(

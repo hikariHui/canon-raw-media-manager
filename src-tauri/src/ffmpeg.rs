@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
-use serde::{Deserialize, Serialize};
 
 /// 视频信息结构体
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,11 +30,15 @@ pub async fn convert_proxy_to_4ch(
     // 构建 ffmpeg 参数
     let output = sidecar_command
         .args([
-            "-i", &input_path,
-            "-c:v", "copy",
-            "-ac", "4",
-            "-c:a", "aac",
-            "-y",  // 覆盖已存在的文件
+            "-i",
+            &input_path,
+            "-c:v",
+            "copy",
+            "-ac",
+            "4",
+            "-c:a",
+            "aac",
+            "-y", // 覆盖已存在的文件
             &output_path,
         ])
         .output()
@@ -63,8 +67,10 @@ pub async fn get_video_info(
 
     let output = sidecar_command
         .args([
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
             &video_path,
@@ -79,7 +85,7 @@ pub async fn get_video_info(
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     // 解析 JSON 输出
     let json: serde_json::Value = serde_json::from_str(&stdout)
         .map_err(|e| format!("Failed to parse ffprobe output: {}", e))?;
@@ -87,17 +93,13 @@ pub async fn get_video_info(
     // 提取视频流信息
     let video_stream = json["streams"]
         .as_array()
-        .and_then(|streams| {
-            streams.iter().find(|s| s["codec_type"] == "video")
-        })
+        .and_then(|streams| streams.iter().find(|s| s["codec_type"] == "video"))
         .ok_or("No video stream found")?;
 
     // 提取音频流信息
     let audio_stream = json["streams"]
         .as_array()
-        .and_then(|streams| {
-            streams.iter().find(|s| s["codec_type"] == "audio")
-        });
+        .and_then(|streams| streams.iter().find(|s| s["codec_type"] == "audio"));
 
     let video_info = VideoInfo {
         duration: json["format"]["duration"]

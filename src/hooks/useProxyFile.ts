@@ -3,9 +3,15 @@ import { curCrmFile } from "./useRawFile";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getProxyVideoPath } from "../utils/getProxyVideoPath";
+import { store } from "../utils/store";
 
 /** proxy 文件目录路径 */
-export const proxyDir = ref("");
+export const proxyDir = ref((await store.get<string>("proxyDir")) || "");
+
+// 监听 proxyDir 变化，保存到 store 中
+watch(proxyDir, async (newDir) => {
+  await store.set("proxyDir", newDir);
+});
 
 /** 当前选中的 proxy 文件路径 */
 export const curProxyFilePath = ref("");
