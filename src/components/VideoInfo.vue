@@ -21,7 +21,7 @@ const videoInfo = ref<VideoInfo | null>(null);
 const errMsg = ref<string | null>(null);
 watch(
   () => props.videoPath,
-  async newVal => {
+  async (newVal) => {
     try {
       const info: VideoInfo = await invoke("get_video_info", {
         videoPath: newVal,
@@ -32,7 +32,7 @@ watch(
       errMsg.value = error as string;
       console.error(error);
     }
-  }
+  },
 );
 </script>
 

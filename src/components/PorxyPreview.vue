@@ -7,7 +7,7 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 
 onMounted(() => {
   // 监听空格键播放/暂停视频
-  window.addEventListener("keydown", event => {
+  window.addEventListener("keydown", (event) => {
     if (event.key === " ") {
       event.preventDefault();
       if (videoRef.value) {

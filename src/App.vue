@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { open } from "@tauri-apps/plugin-dialog";
-import { NButton, NLayout, NLayoutSider, NLayoutContent, NFlex } from "naive-ui";
+import {
+  NButton,
+  NLayout,
+  NLayoutSider,
+  NLayoutContent,
+  NFlex,
+} from "naive-ui";
 
 import { rawDir, curCrmFile } from "./hooks/useRawFile";
 import { proxyDir, curProxyFilePath } from "./hooks/useProxyFile";
@@ -37,7 +43,7 @@ window.addEventListener("keydown", (e) => {
 </script>
 
 <template>
-  <NLayout style="max-height: 100vh;" position="absolute" has-sider>
+  <NLayout style="max-height: 100vh" position="absolute" has-sider>
     <NLayoutSider>
       <NButton @click="chooseDir('rawDir')">Choose Raw Dir</NButton>
       <p>{{ rawDir }}</p>

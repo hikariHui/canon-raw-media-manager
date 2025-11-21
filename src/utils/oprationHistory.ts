@@ -28,7 +28,7 @@ export const undo = () => {
   if (!lastOperations) {
     return;
   }
-  lastOperations.reverse().forEach(async operation => {
+  lastOperations.reverse().forEach(async (operation) => {
     switch (operation.name) {
       case "moveFile":
         const { sourcePath, destinationPath } = operation.params;

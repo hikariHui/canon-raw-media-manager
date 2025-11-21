@@ -8,12 +8,12 @@ import { deleteVideo } from "../hooks/useDeleteVideo";
 /** 当前选中的文件索引 */
 const curIndex = ref(-1);
 // 监听当前选中的文件索引
-watch(curIndex, newVal => {
+watch(curIndex, (newVal) => {
   curCrmFile.value = filesList.value[newVal] ?? "";
 });
 
 // 监听文件列表变化
-watch(filesList, newVal => {
+watch(filesList, (newVal) => {
   // 如果文件列表为空，则设置当前选中的文件索引为 -1
   if (!newVal.length) {
     curIndex.value = -1;
@@ -36,7 +36,7 @@ watch(filesList, newVal => {
 
 onMounted(() => {
   // 监听方向键上下移动
-  window.addEventListener("keydown", event => {
+  window.addEventListener("keydown", (event) => {
     if (event.key === "ArrowUp") {
       curIndex.value = Math.max(curIndex.value - 1, 0);
     } else if (event.key === "ArrowDown") {
@@ -44,7 +44,7 @@ onMounted(() => {
     }
   });
   // 监听删除键/退格键
-  window.addEventListener("keydown", async event => {
+  window.addEventListener("keydown", async (event) => {
     if (event.key === "Delete" || event.key === "Backspace") {
       if (!curCrmFile.value) {
         return;
@@ -56,7 +56,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <NRadioGroup :value="curIndex" @update:value="val => (curIndex = val)">
+  <NRadioGroup :value="curIndex" @update:value="(val) => (curIndex = val)">
     <NRadio v-for="(file, index) in filesList" :key="index" :value="index">{{
       file
     }}</NRadio>
