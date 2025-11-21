@@ -9,6 +9,8 @@ import VideoList from "./components/VideoList.vue";
 import PorxyPreview from "./components/PorxyPreview.vue";
 import VideoInfo from "./components/VideoInfo.vue";
 
+import { undo } from "./utils/oprationHistory";
+
 const dirValMap = {
   rawDir,
   proxyDir,
@@ -25,6 +27,13 @@ const chooseDir = async (targetValue: "rawDir" | "proxyDir") => {
     dirValMap[targetValue].value = selected;
   }
 };
+
+// 监听全局撤销快捷键
+window.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+    undo();
+  }
+});
 </script>
 
 <template>
