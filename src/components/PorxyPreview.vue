@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { NEmpty } from "naive-ui";
 import { curProxyFileUrl } from "../hooks/useProxyFile";
-import { onMounted, ref } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 
 const videoRef = ref<HTMLVideoElement | null>(null);
+
+/** 是否正在播放 */
+const isPlaying = ref(false);
 
 onMounted(() => {
   // 监听空格键播放/暂停视频
@@ -13,10 +16,21 @@ onMounted(() => {
       if (videoRef.value) {
         if (videoRef.value.paused) {
           videoRef.value.play();
+          isPlaying.value = true;
         } else {
           videoRef.value.pause();
+          isPlaying.value = false;
         }
       }
+    }
+  });
+});
+
+watch(curProxyFileUrl, () => {
+  // 视频切换后如果是播放状态则继续自动播放
+  nextTick(() => {
+    if (isPlaying.value && videoRef.value) {
+      videoRef.value.play();
     }
   });
 });
