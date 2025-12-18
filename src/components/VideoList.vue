@@ -3,7 +3,7 @@ import { onMounted, ref, watch } from "vue";
 import { NRadioGroup, NRadio } from "naive-ui";
 import { filesList } from "../hooks/useRawFile";
 import { curCrmFile } from "../hooks/useRawFile";
-import { deleteVideo } from "../hooks/useDeleteVideo";
+import { deleteVideo, starVideo } from "../hooks/useMoveVideo";
 
 /** 当前选中的文件索引 */
 const curIndex = ref(-1);
@@ -50,6 +50,15 @@ onMounted(() => {
         return;
       }
       await deleteVideo(curCrmFile.value);
+    }
+  });
+  // 监听回车键
+  window.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      if (!curCrmFile.value) {
+        return;
+      }
+      await starVideo(curCrmFile.value);
     }
   });
 });

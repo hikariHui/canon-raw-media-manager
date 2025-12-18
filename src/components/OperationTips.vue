@@ -25,7 +25,7 @@ onUnmounted(() => {
 
 <template>
   <div v-show="isFoucsed">
-    空格键：播放；左右箭头：快进/后退5秒；退格键：删除
+    空格键：播放；左右箭头：快进/后退5秒；退格键：删除；回车键：星标
   </div>
   <div v-show="!isFoucsed">应用未聚焦，快捷键不可用</div>
 </template>
