@@ -3,14 +3,14 @@ import { curCrmFile } from "./useRawFile";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getProxyVideoPath } from "../utils/getProxyVideoPath";
-import { store } from "../utils/store";
+import { store, PROXY_DIR_KEY } from "../utils/store";
 
 /** proxy 文件目录路径 */
-export const proxyDir = ref((await store.get<string>("proxyDir")) || "");
+export const proxyDir = ref((await store.get<string>(PROXY_DIR_KEY)) || "");
 
 // 监听 proxyDir 变化，保存到 store 中
 watch(proxyDir, async (newDir) => {
-  await store.set("proxyDir", newDir);
+  await store.set(PROXY_DIR_KEY, newDir);
 });
 
 /** 当前选中的 proxy 文件路径 */

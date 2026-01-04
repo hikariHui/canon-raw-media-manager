@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { NEmpty } from "naive-ui";
+import { NEmpty, NIcon } from "naive-ui";
+import { VideocamOffOutline } from "@vicons/ionicons5";
 import { curProxyFileUrl } from "../hooks/useProxyFile";
 import { nextTick, onMounted, ref, watch } from "vue";
 
@@ -50,12 +51,80 @@ watch(curProxyFileUrl, () => {
 </script>
 
 <template>
-  <NEmpty v-if="!curProxyFileUrl" description="No proxy file"></NEmpty>
-  <video
-    v-else
-    ref="videoRef"
-    :src="curProxyFileUrl"
-    controls
-    style="max-width: 100%"
-  ></video>
+  <div class="preview-container">
+    <NEmpty
+      v-if="!curProxyFileUrl"
+      description="暂无预览文件"
+      class="empty-preview"
+    >
+      <template #icon>
+        <NIcon size="64" :component="VideocamOffOutline" color="#d0d0d0" />
+      </template>
+    </NEmpty>
+
+    <div v-else class="video-wrapper">
+      <video
+        ref="videoRef"
+        :src="curProxyFileUrl"
+        controls
+        class="video-player"
+      ></video>
+    </div>
+  </div>
 </template>
+
+<style scoped>
+.preview-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  overflow: hidden;
+  background: #000;
+  border-radius: 4px;
+}
+
+.empty-preview {
+  width: 100%;
+  padding: 60px 20px;
+  background: #1a1a1a;
+}
+
+/* stylelint-disable-next-line selector-class-pattern */
+:deep(.n-empty .n-empty__description) {
+  color: #999;
+}
+
+.video-wrapper {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  background: #000;
+}
+
+.video-player {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  outline: none;
+}
+
+.video-player:focus {
+  outline: none;
+}
+
+/* 自定义视频控制栏样式 */
+.video-player::-webkit-media-controls-panel {
+  background: linear-gradient(transparent, rgb(0 0 0 / 80%));
+}
+
+.video-player::-webkit-media-controls-play-button {
+  background-color: rgb(255 255 255 / 90%);
+  border-radius: 50%;
+}
+
+.video-player::-webkit-media-controls-current-time-display,
+.video-player::-webkit-media-controls-time-remaining-display {
+  color: white;
+}
+</style>
