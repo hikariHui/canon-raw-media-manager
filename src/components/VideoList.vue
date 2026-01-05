@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { onMounted, ref, useTemplateRef, watch } from "vue";
 import {
   NRadioGroup,
   NRadio,
@@ -8,14 +8,18 @@ import {
   NIcon,
   NBadge,
   NSpin,
+  NButton,
 } from "naive-ui";
-import { VideocamOutline } from "@vicons/ionicons5";
+import { VideocamOutline, NavigateOutline } from "@vicons/ionicons5";
 import { filesList } from "../hooks/useRawFile";
 import { curCrmFile } from "../hooks/useRawFile";
 import { deleteVideo, starVideo } from "../hooks/useMoveVideo";
 
 /** 当前选中的文件索引 */
 const curIndex = ref(-1);
+
+/** 视频列表容器引用 */
+const listContainerRef = useTemplateRef("listContainerRef");
 
 // 提取文件名
 const getFileName = (path: string) => {
@@ -34,6 +38,21 @@ const formatDuration = (seconds?: number): string => {
     return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   }
   return `${minutes}:${secs.toString().padStart(2, "0")}`;
+};
+
+// 滚动到当前选中的视频
+const scrollToCurrentVideo = () => {
+  if (curIndex.value === -1 || !listContainerRef.value) return;
+
+  const radioItems = listContainerRef.value.querySelectorAll(".radio-item");
+  const currentItem = radioItems[curIndex.value] as HTMLElement;
+
+  if (currentItem) {
+    currentItem.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }
 };
 
 // 监听当前选中的文件索引
@@ -112,38 +131,49 @@ onMounted(() => {
       class="empty-state"
     />
 
-    <NRadioGroup
-      v-else
-      :value="curIndex"
-      @update:value="(val) => (curIndex = val)"
-      class="radio-group"
-    >
-      <div
-        v-for="(file, index) in filesList"
-        :key="file.path"
-        class="radio-item"
-        :class="{ active: curIndex === index }"
-      >
-        <NRadio :value="index" class="radio-control">
-          <div class="file-info">
-            <div class="file-header">
-              <NText class="file-name">{{ getFileName(file.path) }}</NText>
-              <div class="file-meta">
-                <NSpin v-if="file.loading" :size="14" />
-                <NText
-                  v-else-if="file.duration"
-                  depth="3"
-                  class="file-duration"
-                >
-                  {{ formatDuration(file.duration) }}
-                </NText>
+    <div v-else ref="listContainerRef" class="radio-group">
+      <NRadioGroup :value="curIndex" @update:value="(val) => (curIndex = val)">
+        <div
+          v-for="(file, index) in filesList"
+          :key="file.path"
+          class="radio-item"
+          :class="{ active: curIndex === index }"
+        >
+          <NRadio :value="index" class="radio-control">
+            <div class="file-info">
+              <div class="file-header">
+                <NText class="file-name">{{ getFileName(file.path) }}</NText>
+                <div class="file-meta">
+                  <NSpin v-if="file.loading" :size="14" />
+                  <NText
+                    v-else-if="file.duration"
+                    depth="3"
+                    class="file-duration"
+                  >
+                    {{ formatDuration(file.duration) }}
+                  </NText>
+                </div>
               </div>
+              <NText depth="3" class="file-index">#{{ index + 1 }}</NText>
             </div>
-            <NText depth="3" class="file-index">#{{ index + 1 }}</NText>
-          </div>
-        </NRadio>
-      </div>
-    </NRadioGroup>
+          </NRadio>
+        </div>
+      </NRadioGroup>
+    </div>
+
+    <!-- 定位按钮 -->
+    <NButton
+      v-if="curIndex !== -1"
+      circle
+      type="primary"
+      class="scroll-to-current-btn"
+      @click="scrollToCurrentVideo"
+      :title="'定位到当前选中的视频'"
+    >
+      <template #icon>
+        <NIcon :component="NavigateOutline" />
+      </template>
+    </NButton>
   </div>
 </template>
 
@@ -265,5 +295,19 @@ onMounted(() => {
 
 .radio-group::-webkit-scrollbar-thumb:hover {
   background: #b0b0b0;
+}
+
+/* 定位按钮 */
+.scroll-to-current-btn {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgb(102 126 234 / 40%);
+}
+
+.scroll-to-current-btn:hover {
+  box-shadow: 0 6px 16px rgb(102 126 234 / 50%);
+  transform: scale(1.1);
 }
 </style>
