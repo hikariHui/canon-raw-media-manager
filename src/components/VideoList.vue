@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, useTemplateRef, watch } from "vue";
+import { nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import {
   NRadioGroup,
   NRadio,
@@ -54,6 +54,12 @@ const scrollToCurrentVideo = () => {
     });
   }
 };
+
+watch(curIndex, () => {
+  nextTick(() => {
+    scrollToCurrentVideo();
+  });
+});
 
 // 监听当前选中的文件索引
 watch(curIndex, (newVal) => {
