@@ -13,6 +13,8 @@ pub struct VideoInfo {
     pub frame_rate: String,
     pub audio_codec: Option<String>,
     pub audio_channels: Option<u32>,
+    pub file_size: u64,
+    pub modified_time: i64,
 }
 
 #[tauri::command]
@@ -101,6 +103,18 @@ pub async fn get_video_info(
         .as_array()
         .and_then(|streams| streams.iter().find(|s| s["codec_type"] == "audio"));
 
+    // 获取文件元数据
+    let metadata = std::fs::metadata(&video_path)
+        .map_err(|e| format!("Failed to get file metadata: {}", e))?;
+    
+    let file_size = metadata.len();
+    let modified_time = metadata
+        .modified()
+        .map_err(|e| format!("Failed to get modified time: {}", e))?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Failed to convert time: {}", e))?
+        .as_secs() as i64;
+
     let video_info = VideoInfo {
         duration: json["format"]["duration"]
             .as_str()
@@ -126,6 +140,8 @@ pub async fn get_video_info(
         audio_channels: audio_stream
             .and_then(|s| s["channels"].as_u64())
             .map(|c| c as u32),
+        file_size,
+        modified_time,
     };
 
     Ok(video_info)

@@ -24,6 +24,8 @@ interface VideoInfo {
   frame_rate: string;
   audio_codec: string | null;
   audio_channels: number | null;
+  file_size: number;
+  modified_time: number;
 }
 
 const videoInfo = ref<VideoInfo | null>(null);
@@ -62,6 +64,29 @@ const formatFrameRate = (frameRate: string) => {
     }
   }
   return frameRate;
+};
+
+// 格式化文件大小
+const formatFileSize = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+};
+
+// 格式化修改时间
+const formatModifiedTime = (timestamp: number) => {
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 };
 
 // 获取文件名
@@ -129,6 +154,14 @@ watch(
           <NTag size="small" type="info">
             {{ videoInfo.width }} × {{ videoInfo.height }}
           </NTag>
+        </NDescriptionsItem>
+
+        <NDescriptionsItem label="文件大小">
+          {{ formatFileSize(videoInfo.file_size) }}
+        </NDescriptionsItem>
+
+        <NDescriptionsItem label="修改时间">
+          {{ formatModifiedTime(videoInfo.modified_time) }}
         </NDescriptionsItem>
 
         <NDescriptionsItem label="时长">
