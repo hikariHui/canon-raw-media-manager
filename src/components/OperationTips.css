@@ -1,0 +1,61 @@
+.tips-content {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.tips-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #794f27;
+  white-space: nowrap;
+}
+
+.tips-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tip-tag {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #794f27;
+  background: #e6f9f6;
+  border-radius: 12px;
+}
+
+.tip-icon {
+  font-size: 14px;
+  color: #19c8b9;
+}
+
+kbd {
+  padding: 2px 6px;
+  font-family: monospace;
+  font-size: 11px;
+  background: #f8f8f0;
+  border: 2px solid #d9d0c0;
+  border-radius: 6px;
+  box-shadow: 0 2px 0 #c4b89e;
+}
+
+.focus-alert {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: #dba90e;
+}
+
+.alert-icon {
+  font-size: 16px;
+  color: #f5c31c;
+}

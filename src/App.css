@@ -1,0 +1,51 @@
+:root {
+  font-family:
+    Nunito,
+    "Noto Sans SC",
+    "Zen Maru Gothic",
+    "HarmonyOS Sans SC",
+    MiSans,
+    -apple-system,
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5715;
+  color: #794f27;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+#app {
+  height: 100%;
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #f8f8f0;
+}
+
+.footer {
+  flex-shrink: 0;
+  padding: 12px 24px;
+  background: #f8f8f0;
+  border-top: 2px solid #d9d0c0;
+  box-shadow: 0 -2px 8px rgb(61 52 40 / 6%);
+}

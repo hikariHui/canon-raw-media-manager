@@ -1,0 +1,145 @@
+.video-list-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+.list-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: #f0e8d8;
+  border-bottom: 2px solid #d9d0c0;
+}
+
+.list-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #794f27;
+}
+
+.list-count {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #19c8b9;
+  background: #e6f9f6;
+  border-radius: 10px;
+}
+
+.empty-state {
+  margin-top: 60px;
+  font-size: 14px;
+  color: #9f927d;
+  text-align: center;
+}
+
+.list-scroll {
+  flex-grow: 1;
+  height: 0;
+  padding: 8px;
+  overflow: hidden auto;
+}
+
+.list-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.list-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.list-scroll::-webkit-scrollbar-thumb {
+  background: #c4b89e;
+  border-radius: 3px;
+}
+
+.list-scroll::-webkit-scrollbar-thumb:hover {
+  background: #aaa69d;
+}
+
+.list-item {
+  padding: 2px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: background 0.2s ease;
+}
+
+.list-item:hover {
+  background: #e6f9f6;
+}
+
+.list-item.active {
+  background: linear-gradient(135deg, #19c8b920 0%, #6fba2c20 100%);
+}
+
+.file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+}
+
+.file-header {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.file-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #794f27;
+  overflow-wrap: break-word;
+}
+
+.file-meta {
+  flex-shrink: 0;
+  min-width: 50px;
+  text-align: right;
+}
+
+.file-duration {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #19c8b9;
+}
+
+.loading-dot {
+  font-size: 11px;
+  color: #c4b89e;
+}
+
+.file-index {
+  font-size: 11px;
+  color: #9f927d;
+}
+
+.scroll-btn {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  box-shadow: 0 4px 12px rgb(25 200 185 / 40%);
+}

@@ -1,6 +1,5 @@
 import { defineConfig } from "vite";
-import vue from "@vitejs/plugin-vue";
-import vueDevTools from "vite-plugin-vue-devtools";
+import react from "@vitejs/plugin-react";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -9,7 +8,7 @@ export default defineConfig(async () => ({
   build: {
     target: "esnext",
   },
-  plugins: [vue(), vueDevTools()],
+  plugins: [react()],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
