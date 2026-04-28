@@ -103,7 +103,7 @@
   font-weight: 600;
   line-height: 1.4;
   color: #794f27;
-  overflow-wrap: break-word;
+  word-break: break-all;
 }
 
 .file-meta {
