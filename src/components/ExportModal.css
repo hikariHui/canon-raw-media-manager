@@ -2,9 +2,10 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  max-width: 100%;
   max-height: min(70vh, 640px);
   padding: 4px 2px 8px;
-  overflow: auto;
+  overflow: hidden auto;
   color: #794f27;
 }
 
@@ -12,6 +13,8 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .export-section h3 {
@@ -29,6 +32,7 @@
   gap: 12px;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .export-hint {
@@ -36,6 +40,7 @@
   font-size: 12px;
   line-height: 1.5;
   color: #9f927d;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
@@ -47,10 +52,17 @@
   list-style: none;
 }
 
+.export-path-list {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .export-path-list li {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   padding: 8px 10px;
   margin-bottom: 6px;
   background: rgb(255 255 255 / 55%);
@@ -60,6 +72,7 @@
 
 .export-path-list li span {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
@@ -69,6 +82,7 @@
 
 .export-icon-btn {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   padding: 4px;
@@ -93,11 +107,13 @@
 }
 
 .export-error {
+  max-width: 100%;
   padding: 10px 12px;
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
   color: #8b2e1f;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
   background: rgb(252 115 109 / 18%);
   border-radius: 8px;
@@ -109,11 +125,13 @@
 }
 
 .export-conflict-list {
+  max-width: 100%;
   max-height: 280px;
-  overflow: auto;
+  overflow: hidden auto;
 }
 
 .export-conflict-list li {
+  min-width: 0;
   padding: 8px 10px;
   margin-bottom: 8px;
   background: rgb(255 255 255 / 55%);
@@ -125,10 +143,17 @@
   display: flex;
   gap: 10px;
   align-items: flex-start;
+  min-width: 0;
   cursor: pointer;
 }
 
+.export-conflict-list label > div {
+  flex: 1;
+  min-width: 0;
+}
+
 .export-conflict-list input {
+  flex-shrink: 0;
   margin-top: 3px;
 }
 
@@ -136,6 +161,7 @@
   font-size: 13px;
   font-weight: 700;
   word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .export-result-meta {
@@ -143,26 +169,36 @@
   font-size: 11px;
   color: #9f927d;
   word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .export-progress-block {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .export-progress-meta {
   display: flex;
   gap: 8px;
   justify-content: space-between;
+  min-width: 0;
   font-size: 12px;
   font-weight: 700;
 }
 
 .export-progress-meta span:first-child {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.export-progress-meta span:last-child {
+  flex-shrink: 0;
 }
 
 .export-progress-track {
@@ -183,6 +219,7 @@
   font-size: 11px;
   color: #9f927d;
   word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .export-summary-counts {
@@ -196,14 +233,18 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .export-result-list {
+  max-width: 100%;
   max-height: 200px;
-  overflow: auto;
+  overflow: hidden auto;
 }
 
 .export-result-list li {
+  min-width: 0;
   padding: 6px 0;
   border-bottom: 1px solid rgb(121 79 39 / 10%);
 }
