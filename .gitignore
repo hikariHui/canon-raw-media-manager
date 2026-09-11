@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Rust / rust-analyzer 构建与分析产物（勿提交）
+target/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
