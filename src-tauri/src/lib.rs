@@ -1,3 +1,4 @@
+mod export;
 mod ffmpeg;
 mod fs;
 
@@ -12,6 +13,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(fs::WatcherManager::new())
+        .manage(export::ExportManager::new())
         .invoke_handler(tauri::generate_handler![
             fs::read_directory_files,
             fs::is_file_exists,
@@ -21,6 +23,13 @@ pub fn run() {
             fs::move_file,
             ffmpeg::convert_proxy_to_4ch,
             ffmpeg::get_video_info,
+            export::scan_card_media,
+            export::check_export_space,
+            export::check_export_space_uniform,
+            export::detect_export_conflicts,
+            export::start_export,
+            export::cancel_export,
+            export::get_today_date_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

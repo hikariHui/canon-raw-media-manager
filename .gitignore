@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 本地导出模拟数据（可用 script 重新生成）
+test-fixtures/export-mock/
+
+# 本地 pnpm store（勿提交）
+.pnpm-store/

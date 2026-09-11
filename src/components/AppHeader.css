@@ -188,3 +188,9 @@
   color: #794f27;
   white-space: nowrap;
 }
+
+.export-entry {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}

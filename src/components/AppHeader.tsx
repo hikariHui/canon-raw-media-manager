@@ -1,11 +1,14 @@
+import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button, Card } from "animal-island-ui";
-import { MdFolderOpen, MdVideocam } from "react-icons/md";
+import { MdFolderOpen, MdVideocam, MdFileUpload } from "react-icons/md";
 import { useAppContext } from "../context/AppContext";
+import ExportModal from "./ExportModal";
 import "./AppHeader.css";
 
 export default function AppHeader() {
   const { rawDir, setRawDir, proxyDir, setProxyDir } = useAppContext();
+  const [exportOpen, setExportOpen] = useState(false);
 
   const chooseDir = async (target: "raw" | "proxy") => {
     const selected = await open({ multiple: false, directory: true });
@@ -68,8 +71,17 @@ export default function AppHeader() {
               </span>
             </div>
           </Card>
+
+          <div className="export-entry">
+            <Button type="primary" onClick={() => setExportOpen(true)}>
+              <MdFileUpload style={{ marginRight: 4 }} />
+              导出
+            </Button>
+          </div>
         </div>
       </div>
+
+      <ExportModal open={exportOpen} onClose={() => setExportOpen(false)} />
     </header>
   );
 }
