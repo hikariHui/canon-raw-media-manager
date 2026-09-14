@@ -31,6 +31,30 @@ body {
   overflow: hidden;
 }
 
+/* animal-island Modal 内置 Cursor，强制自定义指针；改回系统默认 */
+.animal-cursor,
+.animal-cursor * {
+  cursor: auto !important;
+}
+
+.animal-cursor
+  :where(
+    a,
+    button,
+    [role="button"],
+    label,
+    summary,
+    select,
+    input[type="checkbox"],
+    input[type="radio"]
+  ) {
+  cursor: pointer !important;
+}
+
+.animal-cursor :where(:disabled, [disabled]) {
+  cursor: not-allowed !important;
+}
+
 #app {
   height: 100%;
 }
