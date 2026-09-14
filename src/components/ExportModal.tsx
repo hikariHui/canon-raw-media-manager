@@ -32,13 +32,17 @@ function ProgressBar({
   return (
     <div className="export-progress-block">
       <div className="export-progress-meta">
-        <span>{label}</span>
+        <span title={label}>{label}</span>
         <span>{pct.toFixed(1)}%</span>
       </div>
       <div className="export-progress-track">
         <div className="export-progress-fill" style={{ width: `${pct}%` }} />
       </div>
-      {sub ? <div className="export-progress-sub">{sub}</div> : null}
+      {sub ? (
+        <div className="export-progress-sub" title={sub}>
+          {sub}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -108,10 +112,26 @@ export default function ExportModal({ open, onClose }: Props) {
     });
   };
 
+  // 多卡并行时，用各卡当前进度相加作为总进度（不能只看最新一条事件）
+  const cardProgressList = Object.values(cardProgress);
+  const overallCopied = cardProgressList.reduce(
+    (sum, p) => sum + p.cardBytesCopied,
+    0,
+  );
+  const overallTotal =
+    progress?.totalBytes ||
+    cardProgressList.reduce((sum, p) => sum + p.cardTotalBytes, 0);
   const overallPct =
-    progress && progress.totalBytes > 0
-      ? (progress.bytesCopied / progress.totalBytes) * 100
-      : 0;
+    overallTotal > 0 ? (overallCopied / overallTotal) * 100 : 0;
+  // filesDone 在事件里已是全局累计，取各卡最新值中的最大值以防乱序
+  const overallFilesDone = cardProgressList.reduce(
+    (max, p) => Math.max(max, p.filesDone),
+    progress?.filesDone ?? 0,
+  );
+  const overallFilesTotal =
+    progress?.filesTotal ||
+    cardProgressList.reduce((max, p) => Math.max(max, p.filesTotal), 0);
+  const overallFileName = progress?.fileName ?? "";
 
   const skippedAll = finished
     ? [...finished.skippedIdentical, ...finished.skippedConflict]
@@ -293,8 +313,8 @@ export default function ExportModal({ open, onClose }: Props) {
               value={overallPct}
               label="总进度"
               sub={
-                progress
-                  ? `${formatBytes(progress.bytesCopied)} / ${formatBytes(progress.totalBytes)} · ${progress.filesDone}/${progress.filesTotal} · ${progress.fileName}`
+                overallTotal > 0
+                  ? `${formatBytes(overallCopied)} / ${formatBytes(overallTotal)} · ${overallFilesDone}/${overallFilesTotal}${overallFileName ? ` · ${overallFileName}` : ""}`
                   : "准备中…"
               }
             />

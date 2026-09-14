@@ -689,14 +689,14 @@ fn run_export_job(
                     }
 
                     let base_card_bytes = card_bytes_copied;
-                    let base_global = *global_bytes.lock().unwrap();
                     let result = copy_file_with_progress(
                         Path::new(&file.absolute_path),
                         &dest,
                         &cancelled,
                         |written| {
                             let card_now = base_card_bytes + written;
-                            let global_now = base_global + written;
+                            // 已完成字节 + 本文件当前写入；多卡并行时前端会按卡相加
+                            let global_now = *global_bytes.lock().unwrap() + written;
                             let files_done = *global_files_done.lock().unwrap();
                             emit_progress("copying", card_now, global_now, files_done);
                         },
@@ -706,8 +706,9 @@ fn run_export_job(
                         Ok(written) => {
                             card_bytes_copied += written;
                             {
+                                // 必须 +=，不能用快照覆盖，否则多卡并行会互相冲掉进度
                                 let mut b = global_bytes.lock().unwrap();
-                                *b = base_global + written;
+                                *b += written;
                                 let mut f = global_files_done.lock().unwrap();
                                 *f += 1;
                                 emit_progress("copied", card_bytes_copied, *b, *f);
@@ -729,7 +730,7 @@ fn run_export_job(
                             card_bytes_copied += file.size;
                             {
                                 let mut b = global_bytes.lock().unwrap();
-                                *b = base_global + file.size;
+                                *b += file.size;
                                 let mut f = global_files_done.lock().unwrap();
                                 *f += 1;
                                 emit_progress("failed", card_bytes_copied, *b, *f);
