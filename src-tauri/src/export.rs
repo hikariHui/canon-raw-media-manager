@@ -453,7 +453,8 @@ where
             since_emit = 0;
         }
     }
-    dst.flush().map_err(|e| format!("刷新目标文件失败: {}", e))?;
+    dst.flush()
+        .map_err(|e| format!("刷新目标文件失败: {}", e))?;
 
     if let Ok(meta) = fs::metadata(source) {
         if let Ok(mtime) = meta.modified() {
@@ -621,27 +622,25 @@ fn run_export_job(
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| file.relative_path.clone());
 
-                    let emit_progress = |status: &str,
-                                         card_bytes: u64,
-                                         bytes_copied: u64,
-                                         files_done: u64| {
-                        let _ = app.emit(
-                            "export-progress",
-                            ExportProgressEvent {
-                                card_path: scan.card_path.clone(),
-                                export_path: export.clone(),
-                                file_name: file_name.clone(),
-                                relative_path: file.relative_path.clone(),
-                                bytes_copied,
-                                total_bytes: grand_total_bytes,
-                                files_done,
-                                files_total: grand_files_total,
-                                card_bytes_copied: card_bytes,
-                                card_total_bytes,
-                                status: status.to_string(),
-                            },
-                        );
-                    };
+                    let emit_progress =
+                        |status: &str, card_bytes: u64, bytes_copied: u64, files_done: u64| {
+                            let _ = app.emit(
+                                "export-progress",
+                                ExportProgressEvent {
+                                    card_path: scan.card_path.clone(),
+                                    export_path: export.clone(),
+                                    file_name: file_name.clone(),
+                                    relative_path: file.relative_path.clone(),
+                                    bytes_copied,
+                                    total_bytes: grand_total_bytes,
+                                    files_done,
+                                    files_total: grand_files_total,
+                                    card_bytes_copied: card_bytes,
+                                    card_total_bytes,
+                                    status: status.to_string(),
+                                },
+                            );
+                        };
 
                     // 已存在：比对
                     if dest.exists() {
@@ -795,10 +794,7 @@ mod tests {
 
     #[test]
     fn scan_filters_non_media_and_keeps_structure() {
-        let dir = std::env::temp_dir().join(format!(
-            "canon_export_scan_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("canon_export_scan_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("DCIM/100EOSR5")).unwrap();
         fs::create_dir_all(dir.join("CRM/REEL_0001")).unwrap();
@@ -813,7 +809,11 @@ mod tests {
         let result = scan_card(dir.to_str().unwrap());
         assert!(result.error.is_none());
         assert_eq!(result.files.len(), 3);
-        let rels: Vec<_> = result.files.iter().map(|f| f.relative_path.as_str()).collect();
+        let rels: Vec<_> = result
+            .files
+            .iter()
+            .map(|f| f.relative_path.as_str())
+            .collect();
         assert!(rels.contains(&"DCIM/100EOSR5/IMG_0001.CR3"));
         assert!(rels.contains(&"CRM/REEL_0001/A001.CRM"));
         assert!(rels.contains(&"XFVC/REEL_0001/A001.MP4"));
@@ -824,21 +824,15 @@ mod tests {
 
     #[test]
     fn detect_conflict_when_size_differs() {
-        let root = std::env::temp_dir().join(format!(
-            "canon_export_conflict_{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("canon_export_conflict_{}", std::process::id()));
         let card = root.join("card");
         let export = root.join("disk");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(card.join("CRM/REEL_0001")).unwrap();
         fs::write(card.join("CRM/REEL_0001/A001.CRM"), b"full-content-here").unwrap();
         let date = "2026.09.11";
-        let dest = dest_path(
-            export.to_str().unwrap(),
-            date,
-            "CRM/REEL_0001/A001.CRM",
-        );
+        let dest = dest_path(export.to_str().unwrap(), date, "CRM/REEL_0001/A001.CRM");
         fs::create_dir_all(dest.parent().unwrap()).unwrap();
         fs::write(&dest, b"partial").unwrap(); // 模拟中断残留
 
@@ -858,10 +852,7 @@ mod tests {
 
     #[test]
     fn copy_preserves_relative_layout() {
-        let root = std::env::temp_dir().join(format!(
-            "canon_export_copy_{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("canon_export_copy_{}", std::process::id()));
         let card = root.join("card");
         let export = root.join("export");
         let _ = fs::remove_dir_all(&root);
@@ -884,7 +875,10 @@ mod tests {
         assert_eq!(written, 11);
         assert!(dest.exists());
         assert_eq!(
-            dest.strip_prefix(&export).unwrap().to_string_lossy().replace('\\', "/"),
+            dest.strip_prefix(&export)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/"),
             "2026.09.11/DCIM/100EOSR6/MVI_0001.MP4"
         );
 

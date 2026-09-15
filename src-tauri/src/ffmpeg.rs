@@ -106,7 +106,7 @@ pub async fn get_video_info(
     // 获取文件元数据
     let metadata = std::fs::metadata(&video_path)
         .map_err(|e| format!("Failed to get file metadata: {}", e))?;
-    
+
     let file_size = metadata.len();
     let modified_time = metadata
         .modified()

@@ -3,6 +3,7 @@ import AppHeader from "./components/AppHeader";
 import MainWorkspace from "./components/MainWorkspace";
 import OperationTips from "./components/OperationTips";
 import ProxySearchModal from "./components/ProxySearchModal";
+import UpdateModal from "./components/UpdateModal";
 import { undo } from "./utils/oprationHistory";
 import "./App.css";
 
@@ -25,6 +26,7 @@ export default function App() {
         <OperationTips />
       </footer>
       <ProxySearchModal />
+      <UpdateModal />
     </div>
   );
 }

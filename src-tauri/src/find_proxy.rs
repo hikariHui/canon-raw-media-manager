@@ -202,10 +202,7 @@ fn collect_xfvc_candidates(xfvc: &Path, cancelled: &AtomicBool) -> Option<Vec<Pa
     Some(candidates)
 }
 
-fn collect_fallback_candidates(
-    search_root: &Path,
-    cancelled: &AtomicBool,
-) -> Option<Vec<PathBuf>> {
+fn collect_fallback_candidates(search_root: &Path, cancelled: &AtomicBool) -> Option<Vec<PathBuf>> {
     let mut candidates = Vec::new();
     for entry in WalkDir::new(search_root)
         .max_depth(FALLBACK_DEPTH)
@@ -349,11 +346,10 @@ pub async fn find_proxy_directory(
     manager.cancelled.store(false, Ordering::SeqCst);
     let cancelled = Arc::clone(&manager.cancelled);
 
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        do_find_proxy_directory(&raw_dir, &cancelled)
-    })
-    .await
-    .map_err(|e| format!("搜索任务失败: {}", e))?;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || do_find_proxy_directory(&raw_dir, &cancelled))
+            .await
+            .map_err(|e| format!("搜索任务失败: {}", e))?;
 
     Ok(result)
 }
@@ -460,10 +456,7 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&root);
         write_file(root.join("CRM/REEL_0001/a.mp4").as_path(), b"raw");
-        write_file(
-            root.join("XFVC/REEL_0002/a_proxy.mp4").as_path(),
-            b"proxy",
-        );
+        write_file(root.join("XFVC/REEL_0002/a_proxy.mp4").as_path(), b"proxy");
 
         let cancelled = AtomicBool::new(false);
         let raw = root.join("CRM/REEL_0001");
