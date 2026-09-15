@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import AppHeader from "./components/AppHeader";
 import MainWorkspace from "./components/MainWorkspace";
 import OperationTips from "./components/OperationTips";
+import ProxySearchModal from "./components/ProxySearchModal";
 import { undo } from "./utils/oprationHistory";
 import "./App.css";
 
@@ -23,6 +24,7 @@ export default function App() {
       <footer className="footer">
         <OperationTips />
       </footer>
+      <ProxySearchModal />
     </div>
   );
 }

@@ -26,8 +26,9 @@ target/
 *.sln
 *.sw?
 
-# 本地导出模拟数据（可用 script 重新生成）
+# 本地模拟数据（可用 script 重新生成）
 test-fixtures/export-mock/
+test-fixtures/proxy-search/
 
 # 本地 pnpm store（勿提交）
 .pnpm-store/

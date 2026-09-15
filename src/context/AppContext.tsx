@@ -23,6 +23,13 @@ export interface FileItem {
   loading?: boolean;
 }
 
+interface FindProxyResult {
+  path: string | null;
+  cancelled: boolean;
+}
+
+export type ProxySearchPhase = "idle" | "searching" | "not_found";
+
 interface AppContextValue {
   curCrmFile: string;
   setCurCrmFile: (path: string) => void;
@@ -35,6 +42,9 @@ interface AppContextValue {
   curProxyFileUrl: string;
   clearDurationCache: () => Promise<void>;
   updateFileDuration: (filePath: string) => Promise<void>;
+  proxySearchPhase: ProxySearchPhase;
+  cancelProxySearch: () => Promise<void>;
+  dismissProxySearchNotFound: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -46,12 +56,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [proxyDir, setProxyDirState] = useState("");
   const [curProxyFilePath, setCurProxyFilePath] = useState("");
   const [curProxyFileUrl, setCurProxyFileUrl] = useState("");
+  const [proxySearchPhase, setProxySearchPhase] =
+    useState<ProxySearchPhase>("idle");
 
   const durationCache = useRef(new Map<string, number>());
   const saveCacheTimer = useRef<number | null>(null);
   const readDirTimer = useRef<number | null>(null);
   const rawDirRef = useRef(rawDir);
   const filesListRef = useRef(filesList);
+  const proxySearchGen = useRef(0);
+  const proxySearchDelayTimer = useRef<number | null>(null);
 
   useEffect(() => {
     rawDirRef.current = rawDir;
@@ -201,8 +215,82 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [fetchDurationsAsync],
   );
 
-  // rawDir change: save/load cache, persist, watch, read files
+  // rawDir / proxyDir setters + auto proxy search
   const prevRawDir = useRef("");
+
+  const setProxyDir = useCallback(async (newDir: string) => {
+    setProxyDirState(newDir);
+    await store.set(PROXY_DIR_KEY, newDir);
+  }, []);
+
+  const clearProxySearchDelay = useCallback(() => {
+    if (proxySearchDelayTimer.current !== null) {
+      clearTimeout(proxySearchDelayTimer.current);
+      proxySearchDelayTimer.current = null;
+    }
+  }, []);
+
+  const cancelProxySearch = useCallback(async () => {
+    proxySearchGen.current += 1;
+    clearProxySearchDelay();
+    setProxySearchPhase("idle");
+    try {
+      await invoke("cancel_find_proxy_directory");
+    } catch (error) {
+      console.error("取消 Proxy 搜索失败:", error);
+    }
+  }, [clearProxySearchDelay]);
+
+  const dismissProxySearchNotFound = useCallback(() => {
+    setProxySearchPhase("idle");
+  }, []);
+
+  const startProxySearch = useCallback(
+    async (dir: string) => {
+      if (!dir) return;
+
+      // 取消上一轮搜索，避免结果写回旧目录
+      try {
+        await invoke("cancel_find_proxy_directory");
+      } catch {
+        // ignore
+      }
+
+      const gen = ++proxySearchGen.current;
+      clearProxySearchDelay();
+      setProxySearchPhase("idle");
+      proxySearchDelayTimer.current = setTimeout(() => {
+        if (proxySearchGen.current === gen) {
+          setProxySearchPhase("searching");
+        }
+      }, 400) as unknown as number;
+
+      try {
+        const result = await invoke<FindProxyResult>("find_proxy_directory", {
+          rawDir: dir,
+        });
+        if (proxySearchGen.current !== gen) return;
+        clearProxySearchDelay();
+        if (result.cancelled) {
+          setProxySearchPhase("idle");
+          return;
+        }
+        if (result.path) {
+          setProxySearchPhase("idle");
+          await setProxyDir(result.path);
+        } else {
+          setProxySearchPhase("not_found");
+        }
+      } catch (error) {
+        if (proxySearchGen.current !== gen) return;
+        clearProxySearchDelay();
+        setProxySearchPhase("not_found");
+        console.error("自动搜索 Proxy 目录失败:", error);
+      }
+    },
+    [clearProxySearchDelay, setProxyDir],
+  );
+
   const setRawDir = useCallback(
     async (newDir: string) => {
       const oldDir = prevRawDir.current;
@@ -217,15 +305,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       prevRawDir.current = newDir;
       setRawDirState(newDir);
       await store.set(RAW_DIR_KEY, newDir);
-      if (newDir) await loadDurationCache(newDir);
+      if (newDir) {
+        await loadDurationCache(newDir);
+        void startProxySearch(newDir);
+      }
     },
-    [saveDurationCacheImmediate, clearDurationCache, loadDurationCache],
+    [
+      saveDurationCacheImmediate,
+      clearDurationCache,
+      loadDurationCache,
+      startProxySearch,
+    ],
   );
-
-  const setProxyDir = useCallback(async (newDir: string) => {
-    setProxyDirState(newDir);
-    await store.set(PROXY_DIR_KEY, newDir);
-  }, []);
 
   // Watch rawDir: read files + Tauri watch
   useEffect(() => {
@@ -282,6 +373,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("beforeunload", handler);
   }, [saveDurationCacheImmediate]);
 
+  // Cleanup proxy search timers on unmount
+  useEffect(() => {
+    return () => {
+      clearProxySearchDelay();
+      invoke("cancel_find_proxy_directory").catch(() => {});
+    };
+  }, [clearProxySearchDelay]);
+
   // Resolve proxy file when curCrmFile or proxyDir changes
   useEffect(() => {
     const resolve = async () => {
@@ -319,6 +418,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         curProxyFileUrl,
         clearDurationCache,
         updateFileDuration,
+        proxySearchPhase,
+        cancelProxySearch,
+        dismissProxySearchNotFound,
       }}
     >
       {children}
