@@ -39,6 +39,7 @@ jobs:
         run: pnpm install
 
       - name: Build and create Draft Release
+        id: tauri
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -52,3 +53,38 @@ jobs:
           releaseBody: "See the assets to download this version and install."
           releaseDraft: true
           prerelease: false
+
+      # tauri-action@v1 会把 latest.json 的 url 写成 api.github.com/.../assets/{id}，
+      # 客户端无 Token 下载会 403；公开仓库应改用 releases/download 直链。
+      - name: Rewrite latest.json to public download URLs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.tauri.outputs.appVersion }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --clobber
+          node <<'NODE'
+          const fs = require('fs');
+          const { execSync } = require('child_process');
+          const tag = process.env.TAG;
+          const repo = process.env.GITHUB_REPOSITORY;
+          const assets = JSON.parse(
+            execSync(`gh api repos/${repo}/releases/tags/${tag}/assets --paginate`, {
+              encoding: 'utf8',
+            }),
+          );
+          const byId = Object.fromEntries(assets.map((a) => [String(a.id), a.name]));
+          const json = JSON.parse(fs.readFileSync('latest.json', 'utf8'));
+          for (const platform of Object.values(json.platforms || {})) {
+            const match = String(platform.url).match(/\/releases\/assets\/(\d+)/);
+            if (!match) continue;
+            const name = byId[match[1]];
+            if (!name) {
+              throw new Error(`No asset name for id ${match[1]}`);
+            }
+            platform.url = `https://github.com/${repo}/releases/download/${tag}/${name}`;
+          }
+          fs.writeFileSync('latest.json', JSON.stringify(json, null, 2) + '\n');
+          console.log(fs.readFileSync('latest.json', 'utf8'));
+          NODE
+          gh release upload "$TAG" latest.json --repo "$GITHUB_REPOSITORY" --clobber
