@@ -83,10 +83,12 @@ jobs:
 
       # tauri-action@v1 会把 latest.json 的 url 写成 api.github.com/.../assets/{id}，
       # 客户端无 Token 下载会 403；公开仓库应改用 releases/download 直链。
+      # 注意：releaseDraft=true 时 GET /releases/tags/{tag} 会 404，须用 releaseId。
       - name: Rewrite latest.json to public download URLs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v${{ steps.tauri.outputs.appVersion }}
+          RELEASE_ID: ${{ steps.tauri.outputs.releaseId }}
         run: |
           set -euo pipefail
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --clobber
@@ -95,13 +97,15 @@ jobs:
           const { execSync } = require('child_process');
           const tag = process.env.TAG;
           const repo = process.env.GITHUB_REPOSITORY;
+          const releaseId = process.env.RELEASE_ID;
+          if (!releaseId) {
+            throw new Error('Missing RELEASE_ID from tauri-action');
+          }
           const gh = (args) =>
             execSync(`gh api ${args}`, { encoding: 'utf8' });
 
-          // 正确路径：/releases/tags/{tag} → id，再 /releases/{id}/assets
-          const release = JSON.parse(gh(`repos/${repo}/releases/tags/${tag}`));
           const assets = JSON.parse(
-            gh(`repos/${repo}/releases/${release.id}/assets --paginate`),
+            gh(`repos/${repo}/releases/${releaseId}/assets --paginate`),
           );
           const byId = Object.fromEntries(assets.map((a) => [String(a.id), a.name]));
           const json = JSON.parse(fs.readFileSync('latest.json', 'utf8'));
