@@ -169,12 +169,18 @@ fn find_named_child(parent: &Path, name: &str) -> Option<PathBuf> {
     None
 }
 
-fn collect_xfvc_candidates(xfvc: &Path, cancelled: &AtomicBool) -> Option<Vec<PathBuf>> {
+/// 收集容器目录下的候选 Proxy 目录：
+/// - 所有直接子目录（常见为 REEL_*）
+/// - 若容器自身直接含 `_proxy.mp4`，也纳入自身
+fn collect_container_candidates(
+    container: &Path,
+    cancelled: &AtomicBool,
+) -> Option<Vec<PathBuf>> {
     if cancelled.load(Ordering::Relaxed) {
         return None;
     }
     let mut candidates = Vec::new();
-    let Ok(entries) = std::fs::read_dir(xfvc) else {
+    let Ok(entries) = std::fs::read_dir(container) else {
         return Some(candidates);
     };
     let mut has_direct_proxy = false;
@@ -197,9 +203,13 @@ fn collect_xfvc_candidates(xfvc: &Path, cancelled: &AtomicBool) -> Option<Vec<Pa
         }
     }
     if has_direct_proxy {
-        candidates.push(xfvc.to_path_buf());
+        candidates.push(container.to_path_buf());
     }
     Some(candidates)
+}
+
+fn is_reel_folder_name(name: &str) -> bool {
+    name.len() >= 5 && name[..5].eq_ignore_ascii_case("reel_")
 }
 
 fn collect_fallback_candidates(search_root: &Path, cancelled: &AtomicBool) -> Option<Vec<PathBuf>> {
@@ -221,7 +231,8 @@ fn collect_fallback_candidates(search_root: &Path, cancelled: &AtomicBool) -> Op
             .and_then(|n| n.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        if name.contains("proxy") {
+        // 目录名含 proxy，或为 REEL_*（如日期根下直接放代理卷）
+        if name.contains("proxy") || is_reel_folder_name(&name) {
             candidates.push(path.to_path_buf());
         }
     }
@@ -281,7 +292,7 @@ fn do_find_proxy_directory(raw_dir: &str, cancelled: &AtomicBool) -> FindProxyRe
 
     // 主路径：XFVC 下各子目录（及 XFVC 自身若直接含 _proxy.mp4）
     if let Some(xfvc) = find_named_child(&search_root, "XFVC") {
-        let Some(candidates) = collect_xfvc_candidates(&xfvc, cancelled) else {
+        let Some(candidates) = collect_container_candidates(&xfvc, cancelled) else {
             return FindProxyResult {
                 path: None,
                 cancelled: true,
@@ -311,7 +322,39 @@ fn do_find_proxy_directory(raw_dir: &str, cancelled: &AtomicBool) -> FindProxyRe
         };
     }
 
-    // 弱兜底：目录名含 proxy
+    // 次路径：日期根下直接子目录（如 2026.09.21/REEL_0002，无 XFVC 包装）
+    {
+        let Some(candidates) = collect_container_candidates(&search_root, cancelled) else {
+            return FindProxyResult {
+                path: None,
+                cancelled: true,
+            };
+        };
+        match pick_best_candidate(&candidates, &stems, cancelled) {
+            None => {
+                return FindProxyResult {
+                    path: None,
+                    cancelled: true,
+                };
+            }
+            Some(Some(path)) => {
+                return FindProxyResult {
+                    path: Some(path.display().to_string()),
+                    cancelled: false,
+                };
+            }
+            Some(None) => {}
+        }
+    }
+
+    if cancelled.load(Ordering::Relaxed) {
+        return FindProxyResult {
+            path: None,
+            cancelled: true,
+        };
+    }
+
+    // 弱兜底：目录名含 proxy，或为 REEL_*
     let Some(fallback) = collect_fallback_candidates(&search_root, cancelled) else {
         return FindProxyResult {
             path: None,
@@ -440,6 +483,36 @@ mod tests {
         assert_eq!(
             result.path.as_deref(),
             Some(date.join("XFVC/REEL_0002").to_str().unwrap())
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn finds_proxy_reel_directly_under_date() {
+        // 用户场景：源在 日期/CRM/REEL_0001，代理在 日期/REEL_0002（无 XFVC）
+        let root = std::env::temp_dir().join(format!(
+            "find_proxy_date_reel_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let date = root.join("2026.09.21");
+        write_file(date.join("CRM/REEL_0001/A001.CRM").as_path(), b"raw");
+        write_file(
+            date.join("REEL_0002/A001_proxy.mp4").as_path(),
+            b"proxy",
+        );
+
+        let cancelled = AtomicBool::new(false);
+        let raw = date.join("CRM/REEL_0001");
+        let result = do_find_proxy_directory(raw.to_str().unwrap(), &cancelled);
+        assert!(!result.cancelled);
+        assert_eq!(
+            result.path.as_deref(),
+            Some(date.join("REEL_0002").to_str().unwrap())
         );
 
         let _ = fs::remove_dir_all(&root);
