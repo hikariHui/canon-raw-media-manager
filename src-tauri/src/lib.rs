@@ -2,6 +2,7 @@ mod export;
 mod ffmpeg;
 mod find_proxy;
 mod fs;
+mod menu;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
@@ -18,6 +19,10 @@ pub fn run() {
         .manage(fs::WatcherManager::new())
         .manage(find_proxy::FindProxyManager::new())
         .manage(export::ExportManager::new())
+        .setup(|app| {
+            menu::setup(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             fs::read_directory_files,
             fs::is_file_exists,

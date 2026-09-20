@@ -49,7 +49,8 @@ export default function ProxySearchModal() {
         <p
           style={{ margin: 0, color: "#794f27", fontSize: 14, lineHeight: 1.6 }}
         >
-          未能自动定位与当前 Raw 目录匹配的 Proxy 目录，请手动选择。
+          未能自动定位与当前 Raw 目录匹配、且位于允许管理目录内的 Proxy
+          目录，请手动选择。
         </p>
       </Modal>
     );

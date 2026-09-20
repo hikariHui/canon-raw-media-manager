@@ -15,6 +15,7 @@ import {
   RAW_DIR_KEY,
   PROXY_DIR_KEY,
 } from "../utils/store";
+import { ensureAllowedManagedDir } from "../utils/allowedDirs";
 import { getProxyVideoPath } from "../utils/getProxyVideoPath";
 
 export interface FileItem {
@@ -34,10 +35,10 @@ interface AppContextValue {
   curCrmFile: string;
   setCurCrmFile: (path: string) => void;
   rawDir: string;
-  setRawDir: (dir: string) => void;
+  setRawDir: (dir: string) => Promise<boolean>;
   filesList: FileItem[];
   proxyDir: string;
-  setProxyDir: (dir: string) => void;
+  setProxyDir: (dir: string) => Promise<boolean>;
   curProxyFilePath: string;
   curProxyFileUrl: string;
   clearDurationCache: () => Promise<void>;
@@ -219,8 +220,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const prevRawDir = useRef("");
 
   const setProxyDir = useCallback(async (newDir: string) => {
+    if (newDir && !(await ensureAllowedManagedDir(newDir, "Proxy"))) {
+      return false;
+    }
     setProxyDirState(newDir);
     await store.set(PROXY_DIR_KEY, newDir);
+    return true;
   }, []);
 
   const clearProxySearchDelay = useCallback(() => {
@@ -276,6 +281,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         if (result.path) {
+          // 自动结果若超出白名单：静默拒绝，提示手动选择
+          const allowed = await ensureAllowedManagedDir(result.path, "Proxy", {
+            silent: true,
+          });
+          if (!allowed) {
+            setProxySearchPhase("not_found");
+            return;
+          }
           setProxySearchPhase("idle");
           await setProxyDir(result.path);
         } else {
@@ -293,6 +306,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setRawDir = useCallback(
     async (newDir: string) => {
+      if (newDir && !(await ensureAllowedManagedDir(newDir, "Raw"))) {
+        return false;
+      }
       const oldDir = prevRawDir.current;
       if (oldDir && oldDir !== newDir) {
         if (saveCacheTimer.current !== null) {
@@ -309,6 +325,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await loadDurationCache(newDir);
         void startProxySearch(newDir);
       }
+      return true;
     },
     [
       saveDurationCacheImmediate,
