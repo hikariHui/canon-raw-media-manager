@@ -13,6 +13,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 需要完整 tag/commit 历史，供 GitHub 生成 Release Notes
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -38,6 +41,30 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Generate release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          fi
+
+          BODY=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            -f target_commitish="${{ github.sha }}" \
+            --jq .body)
+
+          DELIM="NOTES_EOF_$(openssl rand -hex 8)"
+          {
+            echo "body<<${DELIM}"
+            printf '%s\n' "$BODY"
+            echo "${DELIM}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and create Draft Release
         id: tauri
         uses: tauri-apps/tauri-action@v1
@@ -50,7 +77,7 @@ jobs:
           args: --target aarch64-apple-darwin
           tagName: v__VERSION__
           releaseName: "Canon 媒体管理器 v__VERSION__"
-          releaseBody: "See the assets to download this version and install."
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
 
