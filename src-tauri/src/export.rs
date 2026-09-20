@@ -499,10 +499,7 @@ where
                     })
                 })
                 .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap())
-                .collect()
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
         });
 
         let mut failed_indices = Vec::new();
@@ -536,9 +533,7 @@ where
         return results;
     }
 
-    let source_mtime = fs::metadata(source)
-        .ok()
-        .and_then(|m| m.modified().ok());
+    let source_mtime = fs::metadata(source).ok().and_then(|m| m.modified().ok());
 
     for (idx, mut file) in writers {
         if let Err(e) = file.flush() {
@@ -735,29 +730,28 @@ fn run_export_job(
                     let dest = dest_path(export, &date_folder, &file.relative_path);
                     let key = conflict_key(export, &file.relative_path);
 
-                    let emit_progress =
-                        |status: &str,
-                         export_path: &str,
-                         card_bytes: u64,
-                         bytes_copied: u64,
-                         files_done: u64| {
-                            let _ = app.emit(
-                                "export-progress",
-                                ExportProgressEvent {
-                                    card_path: scan.card_path.clone(),
-                                    export_path: export_path.to_string(),
-                                    file_name: file_name.clone(),
-                                    relative_path: file.relative_path.clone(),
-                                    bytes_copied,
-                                    total_bytes: grand_total_bytes,
-                                    files_done,
-                                    files_total: grand_files_total,
-                                    card_bytes_copied: card_bytes,
-                                    card_total_bytes,
-                                    status: status.to_string(),
-                                },
-                            );
-                        };
+                    let emit_progress = |status: &str,
+                                         export_path: &str,
+                                         card_bytes: u64,
+                                         bytes_copied: u64,
+                                         files_done: u64| {
+                        let _ = app.emit(
+                            "export-progress",
+                            ExportProgressEvent {
+                                card_path: scan.card_path.clone(),
+                                export_path: export_path.to_string(),
+                                file_name: file_name.clone(),
+                                relative_path: file.relative_path.clone(),
+                                bytes_copied,
+                                total_bytes: grand_total_bytes,
+                                files_done,
+                                files_total: grand_files_total,
+                                card_bytes_copied: card_bytes,
+                                card_total_bytes,
+                                status: status.to_string(),
+                            },
+                        );
+                    };
 
                     if dest.exists() {
                         if let Ok(meta) = fs::metadata(&dest) {
@@ -822,8 +816,7 @@ fn run_export_job(
                     continue;
                 }
 
-                let dest_paths: Vec<PathBuf> =
-                    to_copy.iter().map(|(_, d)| d.clone()).collect();
+                let dest_paths: Vec<PathBuf> = to_copy.iter().map(|(_, d)| d.clone()).collect();
                 let copy_count = to_copy.len() as u64;
                 let progress_export = to_copy[0].0.clone();
                 let base_card_bytes = card_bytes_copied;
@@ -1077,8 +1070,7 @@ mod tests {
 
     #[test]
     fn fanout_copy_writes_all_destinations_once_read() {
-        let root =
-            std::env::temp_dir().join(format!("canon_export_fanout_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("canon_export_fanout_{}", std::process::id()));
         let card = root.join("card");
         let disk_a = root.join("disk_a");
         let disk_b = root.join("disk_b");
@@ -1125,17 +1117,10 @@ mod tests {
         // 第二个目标的父路径指向一个「文件」而非目录，制造创建失败
         let blocker = root.join("not_a_dir");
         fs::write(&blocker, b"block").unwrap();
-        let dests = vec![
-            disk_ok.join("out/IMG.CR3"),
-            blocker.join("out/IMG.CR3"),
-        ];
+        let dests = vec![disk_ok.join("out/IMG.CR3"), blocker.join("out/IMG.CR3")];
         let cancelled = AtomicBool::new(false);
-        let results = copy_file_to_many_with_progress(
-            &card.join("DCIM/IMG.CR3"),
-            &dests,
-            &cancelled,
-            |_| {},
-        );
+        let results =
+            copy_file_to_many_with_progress(&card.join("DCIM/IMG.CR3"), &dests, &cancelled, |_| {});
         assert!(results[0].is_ok());
         assert!(results[1].is_err());
         assert_eq!(fs::read(&dests[0]).unwrap(), b"photo-data");

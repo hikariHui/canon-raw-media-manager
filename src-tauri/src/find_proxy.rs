@@ -172,10 +172,7 @@ fn find_named_child(parent: &Path, name: &str) -> Option<PathBuf> {
 /// 收集容器目录下的候选 Proxy 目录：
 /// - 所有直接子目录（常见为 REEL_*）
 /// - 若容器自身直接含 `_proxy.mp4`，也纳入自身
-fn collect_container_candidates(
-    container: &Path,
-    cancelled: &AtomicBool,
-) -> Option<Vec<PathBuf>> {
+fn collect_container_candidates(container: &Path, cancelled: &AtomicBool) -> Option<Vec<PathBuf>> {
     if cancelled.load(Ordering::Relaxed) {
         return None;
     }
@@ -501,10 +498,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         let date = root.join("2026.09.21");
         write_file(date.join("CRM/REEL_0001/A001.CRM").as_path(), b"raw");
-        write_file(
-            date.join("REEL_0002/A001_proxy.mp4").as_path(),
-            b"proxy",
-        );
+        write_file(date.join("REEL_0002/A001_proxy.mp4").as_path(), b"proxy");
 
         let cancelled = AtomicBool::new(false);
         let raw = date.join("CRM/REEL_0001");
