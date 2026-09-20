@@ -93,6 +93,37 @@ export function formatBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
+export function formatSpeed(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "--";
+  if (bytesPerSec >= 1024 ** 3)
+    return `${(bytesPerSec / 1024 ** 3).toFixed(2)} GB/s`;
+  if (bytesPerSec >= 1024 ** 2)
+    return `${(bytesPerSec / 1024 ** 2).toFixed(1)} MB/s`;
+  if (bytesPerSec >= 1024) return `${(bytesPerSec / 1024).toFixed(0)} KB/s`;
+  return `${Math.round(bytesPerSec)} B/s`;
+}
+
+/** 预估剩余时间文案 */
+export function formatEta(seconds: number | null): string {
+  if (seconds == null || !Number.isFinite(seconds)) return "计算中…";
+  if (seconds <= 1) return "即将完成";
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `约 ${h} 小时 ${m} 分`;
+  if (m > 0) return `约 ${m} 分 ${sec} 秒`;
+  return `约 ${sec} 秒`;
+}
+
+export interface ExportThroughput {
+  bytesPerSec: number;
+  etaSeconds: number | null;
+}
+
+const SPEED_WINDOW_MS = 3000;
+const SPEED_MIN_SPAN_MS = 400;
+
 export function formatMtime(secs: number): string {
   if (!secs) return "-";
   return new Date(secs * 1000).toLocaleString();
@@ -112,12 +143,56 @@ export function useCardExport() {
     Record<string, ExportProgressEvent>
   >({});
   const [finished, setFinished] = useState<ExportFinishedEvent | null>(null);
+  const [throughput, setThroughput] = useState<ExportThroughput>({
+    bytesPerSec: 0,
+    etaSeconds: null,
+  });
 
   const unlistenRef = useRef<UnlistenFn[]>([]);
   const cardPathsRef = useRef(cardPaths);
   const exportPathsRef = useRef(exportPaths);
+  const speedSamplesRef = useRef<{ t: number; bytes: number }[]>([]);
+  const cardProgressRef = useRef<Record<string, ExportProgressEvent>>({});
   cardPathsRef.current = cardPaths;
   exportPathsRef.current = exportPaths;
+
+  const resetThroughput = useCallback(() => {
+    speedSamplesRef.current = [];
+    setThroughput({ bytesPerSec: 0, etaSeconds: null });
+  }, []);
+
+  const recordThroughput = useCallback((copied: number, total: number) => {
+    const now = performance.now();
+    const samples = speedSamplesRef.current;
+    const last = samples[samples.length - 1];
+    // 字节未增加时不灌样本，避免跳过文件瞬间把速度拉爆
+    if (!last || copied !== last.bytes) {
+      samples.push({ t: now, bytes: copied });
+    }
+    while (samples.length > 1 && now - samples[0].t > SPEED_WINDOW_MS) {
+      samples.shift();
+    }
+
+    if (samples.length < 2) return;
+    const first = samples[0];
+    const latest = samples[samples.length - 1];
+    const dtMs = latest.t - first.t;
+    if (dtMs < SPEED_MIN_SPAN_MS) return;
+
+    const bytesPerSec = Math.max(
+      0,
+      (latest.bytes - first.bytes) / (dtMs / 1000),
+    );
+    const remaining = Math.max(0, total - copied);
+    const etaSeconds =
+      bytesPerSec > 0 && remaining > 0
+        ? remaining / bytesPerSec
+        : remaining <= 0
+          ? 0
+          : null;
+
+    setThroughput({ bytesPerSec, etaSeconds });
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -190,21 +265,34 @@ export function useCardExport() {
     setProgress(null);
     setCardProgress({});
     setFinished(null);
-  }, [clearListeners]);
+    cardProgressRef.current = {};
+    resetThroughput();
+  }, [clearListeners, resetThroughput]);
 
   const runExport = useCallback(
     async (folder: string, keys: string[]) => {
       setPhase("exporting");
       setError("");
       setFinished(null);
+      setProgress(null);
+      setCardProgress({});
+      cardProgressRef.current = {};
+      resetThroughput();
       clearListeners();
 
       const u1 = await listen<ExportProgressEvent>("export-progress", (ev) => {
         setProgress(ev.payload);
-        setCardProgress((prev) => ({
-          ...prev,
+        const next = {
+          ...cardProgressRef.current,
           [ev.payload.cardPath]: ev.payload,
-        }));
+        };
+        cardProgressRef.current = next;
+        setCardProgress(next);
+        const copied = Object.values(next).reduce(
+          (sum, p) => sum + p.cardBytesCopied,
+          0,
+        );
+        recordThroughput(copied, ev.payload.totalBytes);
       });
       const u2 = await listen<ExportFinishedEvent>("export-finished", (ev) => {
         setFinished(ev.payload);
@@ -224,7 +312,7 @@ export function useCardExport() {
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [clearListeners],
+    [clearListeners, recordThroughput, resetThroughput],
   );
 
   const prepareExport = useCallback(async () => {
@@ -232,6 +320,8 @@ export function useCardExport() {
     setFinished(null);
     setProgress(null);
     setCardProgress({});
+    cardProgressRef.current = {};
+    resetThroughput();
     const cards = cardPathsRef.current;
     const exports = exportPathsRef.current;
     if (!cards.length) {
@@ -312,7 +402,7 @@ export function useCardExport() {
       setPhase("idle");
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [runExport]);
+  }, [runExport, resetThroughput]);
 
   const confirmConflictsAndExport = useCallback(async () => {
     await runExport(dateFolder, Array.from(overwriteKeys));
@@ -340,6 +430,7 @@ export function useCardExport() {
     dateFolder,
     progress,
     cardProgress,
+    throughput,
     finished,
     addCardPath,
     removeCardPath,

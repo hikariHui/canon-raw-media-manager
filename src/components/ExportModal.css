@@ -226,6 +226,21 @@
   white-space: nowrap;
 }
 
+.export-progress-stats {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  color: #6b5e4a;
+  white-space: nowrap;
+}
+
 .export-summary-counts {
   margin: 0;
   font-size: 14px;

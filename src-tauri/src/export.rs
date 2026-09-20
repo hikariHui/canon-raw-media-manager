@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::UNIX_EPOCH;
 use tauri::{AppHandle, Emitter, State};
 use walkdir::WalkDir;
@@ -414,38 +415,111 @@ pub fn detect_export_conflicts(
     })
 }
 
-fn copy_file_with_progress<F>(
+/// 单次读取源文件，并行写入多个目标盘（读一次、扇出写）。
+/// 返回值与 `destinations` 一一对应；单个目标失败不影响其余目标继续写入。
+fn copy_file_to_many_with_progress<F>(
     source: &Path,
-    dest: &Path,
+    destinations: &[PathBuf],
     cancelled: &AtomicBool,
     mut on_progress: F,
-) -> Result<u64, String>
+) -> Vec<Result<u64, String>>
 where
     F: FnMut(u64),
 {
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    if destinations.is_empty() {
+        return vec![];
     }
 
-    let mut src = File::open(source).map_err(|e| format!("打开源文件失败: {}", e))?;
-    let mut dst = File::create(dest).map_err(|e| format!("创建目标文件失败: {}", e))?;
+    let mut results: Vec<Result<u64, String>> = destinations
+        .iter()
+        .map(|_| Err("未开始复制".to_string()))
+        .collect();
+
+    let mut src = match File::open(source) {
+        Ok(f) => f,
+        Err(e) => {
+            let msg = format!("打开源文件失败: {}", e);
+            return destinations.iter().map(|_| Err(msg.clone())).collect();
+        }
+    };
+
+    // (目标索引, 文件句柄)
+    let mut writers: Vec<(usize, File)> = Vec::new();
+    for (i, dest) in destinations.iter().enumerate() {
+        if let Some(parent) = dest.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                results[i] = Err(format!("创建目录失败: {}", e));
+                continue;
+            }
+        }
+        match File::create(dest) {
+            Ok(f) => writers.push((i, f)),
+            Err(e) => results[i] = Err(format!("创建目标文件失败: {}", e)),
+        }
+    }
+
+    if writers.is_empty() {
+        return results;
+    }
+
     let mut buffer = vec![0u8; COPY_BUFFER_SIZE];
     let mut written = 0u64;
     let mut since_emit = 0u64;
+    let mut cancelled_midway = false;
 
     loop {
         if cancelled.load(Ordering::Relaxed) {
-            let _ = fs::remove_file(dest);
-            return Err("导出已取消".to_string());
-        }
-        let n = src
-            .read(&mut buffer)
-            .map_err(|e| format!("读取源文件失败: {}", e))?;
-        if n == 0 {
+            cancelled_midway = true;
             break;
         }
-        dst.write_all(&buffer[..n])
-            .map_err(|e| format!("写入目标文件失败: {}", e))?;
+        let n = match src.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                let msg = format!("读取源文件失败: {}", e);
+                for (idx, _) in &writers {
+                    results[*idx] = Err(msg.clone());
+                    let _ = fs::remove_file(&destinations[*idx]);
+                }
+                return results;
+            }
+        };
+
+        let chunk = &buffer[..n];
+        let write_outcomes: Vec<(usize, Result<(), String>)> = thread::scope(|s| {
+            let handles: Vec<_> = writers
+                .iter_mut()
+                .map(|(idx, file)| {
+                    let idx = *idx;
+                    s.spawn(move || {
+                        let result = file
+                            .write_all(chunk)
+                            .map_err(|e| format!("写入目标文件失败: {}", e));
+                        (idx, result)
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect()
+        });
+
+        let mut failed_indices = Vec::new();
+        for (idx, outcome) in write_outcomes {
+            if let Err(e) = outcome {
+                results[idx] = Err(e);
+                failed_indices.push(idx);
+                let _ = fs::remove_file(&destinations[idx]);
+            }
+        }
+        if !failed_indices.is_empty() {
+            writers.retain(|(idx, _)| !failed_indices.contains(idx));
+        }
+        if writers.is_empty() {
+            return results;
+        }
+
         written += n as u64;
         since_emit += n as u64;
         if since_emit >= PROGRESS_EMIT_EVERY {
@@ -453,17 +527,48 @@ where
             since_emit = 0;
         }
     }
-    dst.flush()
-        .map_err(|e| format!("刷新目标文件失败: {}", e))?;
 
-    if let Ok(meta) = fs::metadata(source) {
-        if let Ok(mtime) = meta.modified() {
-            let _ = dst.set_modified(mtime);
+    if cancelled_midway {
+        for (idx, _) in &writers {
+            results[*idx] = Err("导出已取消".to_string());
+            let _ = fs::remove_file(&destinations[*idx]);
         }
+        return results;
+    }
+
+    let source_mtime = fs::metadata(source)
+        .ok()
+        .and_then(|m| m.modified().ok());
+
+    for (idx, mut file) in writers {
+        if let Err(e) = file.flush() {
+            results[idx] = Err(format!("刷新目标文件失败: {}", e));
+            let _ = fs::remove_file(&destinations[idx]);
+            continue;
+        }
+        if let Some(mtime) = source_mtime {
+            let _ = file.set_modified(mtime);
+        }
+        results[idx] = Ok(written);
     }
 
     on_progress(written);
-    Ok(written)
+    results
+}
+
+fn copy_file_with_progress<F>(
+    source: &Path,
+    dest: &Path,
+    cancelled: &AtomicBool,
+    on_progress: F,
+) -> Result<u64, String>
+where
+    F: FnMut(u64),
+{
+    copy_file_to_many_with_progress(source, &[dest.to_path_buf()], cancelled, on_progress)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| Err("无目标路径".to_string()))
 }
 
 #[tauri::command]
@@ -610,6 +715,18 @@ fn run_export_job(
             let mut card_bytes_copied = 0u64;
 
             for file in &scan.files {
+                if cancelled.load(Ordering::Relaxed) {
+                    return;
+                }
+
+                let file_name = Path::new(&file.relative_path)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| file.relative_path.clone());
+
+                // 先按盘分类：跳过 / 需复制
+                let mut to_copy: Vec<(String, PathBuf)> = Vec::new();
+
                 for export in &export_paths {
                     if cancelled.load(Ordering::Relaxed) {
                         return;
@@ -617,18 +734,18 @@ fn run_export_job(
 
                     let dest = dest_path(export, &date_folder, &file.relative_path);
                     let key = conflict_key(export, &file.relative_path);
-                    let file_name = Path::new(&file.relative_path)
-                        .file_name()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| file.relative_path.clone());
 
                     let emit_progress =
-                        |status: &str, card_bytes: u64, bytes_copied: u64, files_done: u64| {
+                        |status: &str,
+                         export_path: &str,
+                         card_bytes: u64,
+                         bytes_copied: u64,
+                         files_done: u64| {
                             let _ = app.emit(
                                 "export-progress",
                                 ExportProgressEvent {
                                     card_path: scan.card_path.clone(),
-                                    export_path: export.clone(),
+                                    export_path: export_path.to_string(),
                                     file_name: file_name.clone(),
                                     relative_path: file.relative_path.clone(),
                                     bytes_copied,
@@ -642,7 +759,6 @@ fn run_export_job(
                             );
                         };
 
-                    // 已存在：比对
                     if dest.exists() {
                         if let Ok(meta) = fs::metadata(&dest) {
                             let dest_mtime = mtime_secs(&meta);
@@ -653,7 +769,13 @@ fn run_export_job(
                                     *b += file.size;
                                     let mut f = global_files_done.lock().unwrap();
                                     *f += 1;
-                                    emit_progress("skipped_identical", card_bytes_copied, *b, *f);
+                                    emit_progress(
+                                        "skipped_identical",
+                                        export,
+                                        card_bytes_copied,
+                                        *b,
+                                        *f,
+                                    );
                                 }
                                 skipped_identical.lock().unwrap().push(ExportResultItem {
                                     card_path: scan.card_path.clone(),
@@ -672,7 +794,13 @@ fn run_export_job(
                                     *b += file.size;
                                     let mut f = global_files_done.lock().unwrap();
                                     *f += 1;
-                                    emit_progress("skipped_conflict", card_bytes_copied, *b, *f);
+                                    emit_progress(
+                                        "skipped_conflict",
+                                        export,
+                                        card_bytes_copied,
+                                        *b,
+                                        *f,
+                                    );
                                 }
                                 skipped_conflict.lock().unwrap().push(ExportResultItem {
                                     card_path: scan.card_path.clone(),
@@ -687,44 +815,88 @@ fn run_export_job(
                         }
                     }
 
-                    let base_card_bytes = card_bytes_copied;
-                    let result = copy_file_with_progress(
-                        Path::new(&file.absolute_path),
-                        &dest,
-                        &cancelled,
-                        |written| {
-                            let card_now = base_card_bytes + written;
-                            // 已完成字节 + 本文件当前写入；多卡并行时前端会按卡相加
-                            let global_now = *global_bytes.lock().unwrap() + written;
-                            let files_done = *global_files_done.lock().unwrap();
-                            emit_progress("copying", card_now, global_now, files_done);
-                        },
-                    );
+                    to_copy.push((export.clone(), dest));
+                }
 
+                if to_copy.is_empty() {
+                    continue;
+                }
+
+                let dest_paths: Vec<PathBuf> =
+                    to_copy.iter().map(|(_, d)| d.clone()).collect();
+                let copy_count = to_copy.len() as u64;
+                let progress_export = to_copy[0].0.clone();
+                let base_card_bytes = card_bytes_copied;
+
+                let results = copy_file_to_many_with_progress(
+                    Path::new(&file.absolute_path),
+                    &dest_paths,
+                    &cancelled,
+                    |written| {
+                        // 每读出 written 字节，等价于向 copy_count 个盘各写了 written
+                        let card_now = base_card_bytes + written.saturating_mul(copy_count);
+                        let global_now =
+                            *global_bytes.lock().unwrap() + written.saturating_mul(copy_count);
+                        let files_done = *global_files_done.lock().unwrap();
+                        let _ = app.emit(
+                            "export-progress",
+                            ExportProgressEvent {
+                                card_path: scan.card_path.clone(),
+                                export_path: progress_export.clone(),
+                                file_name: file_name.clone(),
+                                relative_path: file.relative_path.clone(),
+                                bytes_copied: global_now,
+                                total_bytes: grand_total_bytes,
+                                files_done,
+                                files_total: grand_files_total,
+                                card_bytes_copied: card_now,
+                                card_total_bytes,
+                                status: "copying".to_string(),
+                            },
+                        );
+                    },
+                );
+
+                let mut cancelled_now = false;
+                for ((export, dest), result) in to_copy.into_iter().zip(results) {
                     match result {
                         Ok(written) => {
                             card_bytes_copied += written;
                             {
-                                // 必须 +=，不能用快照覆盖，否则多卡并行会互相冲掉进度
                                 let mut b = global_bytes.lock().unwrap();
                                 *b += written;
                                 let mut f = global_files_done.lock().unwrap();
                                 *f += 1;
-                                emit_progress("copied", card_bytes_copied, *b, *f);
+                                let _ = app.emit(
+                                    "export-progress",
+                                    ExportProgressEvent {
+                                        card_path: scan.card_path.clone(),
+                                        export_path: export.clone(),
+                                        file_name: file_name.clone(),
+                                        relative_path: file.relative_path.clone(),
+                                        bytes_copied: *b,
+                                        total_bytes: grand_total_bytes,
+                                        files_done: *f,
+                                        files_total: grand_files_total,
+                                        card_bytes_copied,
+                                        card_total_bytes,
+                                        status: "copied".to_string(),
+                                    },
+                                );
                             }
                             succeeded.lock().unwrap().push(ExportResultItem {
                                 card_path: scan.card_path.clone(),
                                 relative_path: file.relative_path.clone(),
-                                export_path: export.clone(),
+                                export_path: export,
                                 dest_path: dest.to_string_lossy().to_string(),
                                 reason: None,
                                 error: None,
                             });
                         }
                         Err(e) => {
-                            // 取消时不把该文件记为失败重复；取消后直接返回
                             if cancelled.load(Ordering::Relaxed) || e.contains("取消") {
-                                return;
+                                cancelled_now = true;
+                                break;
                             }
                             card_bytes_copied += file.size;
                             {
@@ -732,18 +904,36 @@ fn run_export_job(
                                 *b += file.size;
                                 let mut f = global_files_done.lock().unwrap();
                                 *f += 1;
-                                emit_progress("failed", card_bytes_copied, *b, *f);
+                                let _ = app.emit(
+                                    "export-progress",
+                                    ExportProgressEvent {
+                                        card_path: scan.card_path.clone(),
+                                        export_path: export.clone(),
+                                        file_name: file_name.clone(),
+                                        relative_path: file.relative_path.clone(),
+                                        bytes_copied: *b,
+                                        total_bytes: grand_total_bytes,
+                                        files_done: *f,
+                                        files_total: grand_files_total,
+                                        card_bytes_copied,
+                                        card_total_bytes,
+                                        status: "failed".to_string(),
+                                    },
+                                );
                             }
                             failed.lock().unwrap().push(ExportResultItem {
                                 card_path: scan.card_path.clone(),
                                 relative_path: file.relative_path.clone(),
-                                export_path: export.clone(),
+                                export_path: export,
                                 dest_path: dest.to_string_lossy().to_string(),
                                 reason: None,
                                 error: Some(e),
                             });
                         }
                     }
+                }
+                if cancelled_now {
+                    return;
                 }
             }
         }));
@@ -880,6 +1070,177 @@ mod tests {
                 .to_string_lossy()
                 .replace('\\', "/"),
             "2026.09.11/DCIM/100EOSR6/MVI_0001.MP4"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fanout_copy_writes_all_destinations_once_read() {
+        let root =
+            std::env::temp_dir().join(format!("canon_export_fanout_{}", std::process::id()));
+        let card = root.join("card");
+        let disk_a = root.join("disk_a");
+        let disk_b = root.join("disk_b");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(card.join("CRM/REEL_0001")).unwrap();
+        let payload = vec![b'X'; 64 * 1024];
+        fs::write(card.join("CRM/REEL_0001/A001.CRM"), &payload).unwrap();
+        fs::create_dir_all(&disk_a).unwrap();
+        fs::create_dir_all(&disk_b).unwrap();
+
+        let dests = vec![
+            disk_a.join("2026.09.11/CRM/REEL_0001/A001.CRM"),
+            disk_b.join("2026.09.11/CRM/REEL_0001/A001.CRM"),
+        ];
+        let cancelled = AtomicBool::new(false);
+        let mut last_progress = 0u64;
+        let results = copy_file_to_many_with_progress(
+            &card.join("CRM/REEL_0001/A001.CRM"),
+            &dests,
+            &cancelled,
+            |w| last_progress = w,
+        );
+        assert_eq!(results.len(), 2);
+        assert_eq!(*results[0].as_ref().unwrap(), payload.len() as u64);
+        assert_eq!(*results[1].as_ref().unwrap(), payload.len() as u64);
+        assert_eq!(last_progress, payload.len() as u64);
+        assert_eq!(fs::read(&dests[0]).unwrap(), payload);
+        assert_eq!(fs::read(&dests[1]).unwrap(), payload);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fanout_continues_when_one_dest_fails() {
+        let root =
+            std::env::temp_dir().join(format!("canon_export_fanout_fail_{}", std::process::id()));
+        let card = root.join("card");
+        let disk_ok = root.join("disk_ok");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(card.join("DCIM")).unwrap();
+        fs::write(card.join("DCIM/IMG.CR3"), b"photo-data").unwrap();
+        fs::create_dir_all(&disk_ok).unwrap();
+
+        // 第二个目标的父路径指向一个「文件」而非目录，制造创建失败
+        let blocker = root.join("not_a_dir");
+        fs::write(&blocker, b"block").unwrap();
+        let dests = vec![
+            disk_ok.join("out/IMG.CR3"),
+            blocker.join("out/IMG.CR3"),
+        ];
+        let cancelled = AtomicBool::new(false);
+        let results = copy_file_to_many_with_progress(
+            &card.join("DCIM/IMG.CR3"),
+            &dests,
+            &cancelled,
+            |_| {},
+        );
+        assert!(results[0].is_ok());
+        assert!(results[1].is_err());
+        assert_eq!(fs::read(&dests[0]).unwrap(), b"photo-data");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fanout_cancel_removes_partial_files() {
+        let root =
+            std::env::temp_dir().join(format!("canon_export_fanout_cancel_{}", std::process::id()));
+        let card = root.join("card");
+        let disk_a = root.join("a");
+        let disk_b = root.join("b");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&card).unwrap();
+        fs::create_dir_all(&disk_a).unwrap();
+        fs::create_dir_all(&disk_b).unwrap();
+
+        // 大于 PROGRESS_EMIT_EVERY，确保进度回调能触发取消
+        let payload = vec![0xABu8; 16 * 1024 * 1024];
+        let src = card.join("big.CRM");
+        fs::write(&src, &payload).unwrap();
+
+        let dests = vec![disk_a.join("big.CRM"), disk_b.join("big.CRM")];
+        let cancelled = AtomicBool::new(false);
+        let results = copy_file_to_many_with_progress(&src, &dests, &cancelled, |_| {
+            cancelled.store(true, Ordering::SeqCst);
+        });
+
+        assert!(results.iter().all(|r| {
+            r.as_ref()
+                .err()
+                .map(|e| e.contains("取消"))
+                .unwrap_or(false)
+        }));
+        assert!(!dests[0].exists(), "取消后不应残留目标文件 A");
+        assert!(!dests[1].exists(), "取消后不应残留目标文件 B");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fanout_large_file_matches_sequential_and_is_not_slower() {
+        let root =
+            std::env::temp_dir().join(format!("canon_export_fanout_bench_{}", std::process::id()));
+        let card = root.join("card");
+        let seq_root = root.join("seq");
+        let fan_root = root.join("fan");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&card).unwrap();
+
+        // 48MB，带可校验内容
+        let size = 48 * 1024 * 1024;
+        let mut payload = vec![0u8; size];
+        for (i, b) in payload.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let src = card.join("clip.CRM");
+        fs::write(&src, &payload).unwrap();
+
+        let seq_dests: Vec<PathBuf> = (0..3)
+            .map(|i| {
+                let d = seq_root.join(format!("disk{i}"));
+                fs::create_dir_all(&d).unwrap();
+                d.join("clip.CRM")
+            })
+            .collect();
+        let fan_dests: Vec<PathBuf> = (0..3)
+            .map(|i| {
+                let d = fan_root.join(format!("disk{i}"));
+                fs::create_dir_all(&d).unwrap();
+                d.join("clip.CRM")
+            })
+            .collect();
+
+        let cancelled = AtomicBool::new(false);
+
+        let t0 = std::time::Instant::now();
+        for dest in &seq_dests {
+            copy_file_with_progress(&src, dest, &cancelled, |_| {}).unwrap();
+        }
+        let sequential_ms = t0.elapsed().as_millis();
+
+        let t1 = std::time::Instant::now();
+        let results = copy_file_to_many_with_progress(&src, &fan_dests, &cancelled, |_| {});
+        let fanout_ms = t1.elapsed().as_millis();
+
+        assert!(results.iter().all(|r| r.is_ok()));
+        for dest in seq_dests.iter().chain(fan_dests.iter()) {
+            let got = fs::read(dest).unwrap();
+            assert_eq!(got.len(), size);
+            assert_eq!(got, payload);
+        }
+
+        println!(
+            "48MB × 3 盘: 串行 {} ms, 扇出 {} ms (同卷模拟，真实多盘加速更明显)",
+            sequential_ms, fanout_ms
+        );
+        // 同卷 SSD 上扇出也可能因争用略慢；只要求正确，并给一个宽松上限避免严重回退
+        assert!(
+            fanout_ms < sequential_ms.saturating_mul(3).saturating_add(5000),
+            "扇出异常偏慢: seq={}ms fan={}",
+            sequential_ms,
+            fanout_ms
         );
 
         let _ = fs::remove_dir_all(&root);

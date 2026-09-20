@@ -10,6 +10,8 @@ import {
   useCardExport,
   formatBytes,
   formatMtime,
+  formatSpeed,
+  formatEta,
   type ExportResultItem,
 } from "../hooks/useCardExport";
 import "./ExportModal.css";
@@ -23,10 +25,12 @@ function ProgressBar({
   value,
   label,
   sub,
+  stats,
 }: {
   value: number;
   label: string;
   sub?: string;
+  stats?: string;
 }) {
   const pct = Math.max(0, Math.min(100, value));
   return (
@@ -41,6 +45,11 @@ function ProgressBar({
       {sub ? (
         <div className="export-progress-sub" title={sub}>
           {sub}
+        </div>
+      ) : null}
+      {stats ? (
+        <div className="export-progress-stats" title={stats}>
+          {stats}
         </div>
       ) : null}
     </div>
@@ -82,6 +91,7 @@ export default function ExportModal({ open, onClose }: Props) {
     dateFolder,
     progress,
     cardProgress,
+    throughput,
     finished,
     addCardPath,
     removeCardPath,
@@ -132,6 +142,14 @@ export default function ExportModal({ open, onClose }: Props) {
     progress?.filesTotal ||
     cardProgressList.reduce((max, p) => Math.max(max, p.filesTotal), 0);
   const overallFileName = progress?.fileName ?? "";
+  const speedText = formatSpeed(throughput.bytesPerSec);
+  const etaText = formatEta(throughput.etaSeconds);
+  const overallStats =
+    overallTotal > 0
+      ? throughput.bytesPerSec > 0
+        ? `速度 ${speedText} · 剩余 ${etaText}`
+        : "速度计算中…"
+      : undefined;
 
   const skippedAll = finished
     ? [...finished.skippedIdentical, ...finished.skippedConflict]
@@ -317,6 +335,7 @@ export default function ExportModal({ open, onClose }: Props) {
                   ? `${formatBytes(overallCopied)} / ${formatBytes(overallTotal)} · ${overallFilesDone}/${overallFilesTotal}${overallFileName ? ` · ${overallFileName}` : ""}`
                   : "准备中…"
               }
+              stats={overallStats}
             />
             {Object.entries(cardProgress).map(([card, p]) => {
               const pct =
