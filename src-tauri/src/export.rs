@@ -551,6 +551,7 @@ where
     results
 }
 
+#[cfg(test)]
 fn copy_file_with_progress<F>(
     source: &Path,
     dest: &Path,
