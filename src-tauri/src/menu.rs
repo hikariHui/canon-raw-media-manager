@@ -4,12 +4,14 @@ use tauri::{
 };
 
 const SETTINGS_MENU_ID: &str = "settings";
+const CHECK_UPDATE_MENU_ID: &str = "check-update";
 
-/// 构建原生菜单栏，并在点击「设置」时向前端发送 `open-settings` 事件。
+/// 构建原生菜单栏，并在点击菜单项时向前端发送对应事件。
 pub fn setup(app: &mut App<Wry>) -> Result<()> {
     let settings = MenuItemBuilder::with_id(SETTINGS_MENU_ID, "设置…")
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
+    let check_update = MenuItemBuilder::with_id(CHECK_UPDATE_MENU_ID, "检查更新…").build(app)?;
 
     #[cfg(target_os = "macos")]
     {
@@ -17,6 +19,7 @@ pub fn setup(app: &mut App<Wry>) -> Result<()> {
             .about(None)
             .separator()
             .item(&settings)
+            .item(&check_update)
             .separator()
             .services()
             .separator()
@@ -54,6 +57,7 @@ pub fn setup(app: &mut App<Wry>) -> Result<()> {
     {
         let file_menu = SubmenuBuilder::new(app, "文件")
             .item(&settings)
+            .item(&check_update)
             .separator()
             .quit()
             .build()?;
@@ -77,6 +81,8 @@ pub fn setup(app: &mut App<Wry>) -> Result<()> {
     app.on_menu_event(|app, event| {
         if event.id() == SETTINGS_MENU_ID {
             let _ = app.emit("open-settings", ());
+        } else if event.id() == CHECK_UPDATE_MENU_ID {
+            let _ = app.emit("check-update", ());
         }
     });
 
