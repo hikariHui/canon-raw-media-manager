@@ -5,12 +5,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 
 type Phase =
-  | "idle"
-  | "checking"
-  | "up-to-date"
-  | "available"
-  | "downloading"
-  | "error";
+  "idle" | "checking" | "up-to-date" | "available" | "downloading" | "error";
 
 export default function UpdateModal() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -130,7 +125,6 @@ export default function UpdateModal() {
       width={420}
       typewriter={false}
       maskClosable={!busy}
-      closable={!busy}
       onClose={dismiss}
       footer={footer}
     >

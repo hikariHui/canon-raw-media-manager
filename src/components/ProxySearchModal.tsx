@@ -13,7 +13,6 @@ export default function ProxySearchModal() {
         width={420}
         typewriter={false}
         maskClosable={false}
-        closable={false}
         onClose={cancelProxySearch}
         footer={
           <Button type="primary" onClick={cancelProxySearch}>
@@ -38,7 +37,6 @@ export default function ProxySearchModal() {
         width={420}
         typewriter={false}
         maskClosable
-        closable
         onClose={dismissProxySearchNotFound}
         footer={
           <Button type="primary" onClick={dismissProxySearchNotFound}>

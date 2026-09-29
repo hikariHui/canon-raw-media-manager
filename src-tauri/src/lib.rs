@@ -3,6 +3,7 @@ mod ffmpeg;
 mod find_proxy;
 mod fs;
 mod menu;
+mod sync;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
@@ -19,6 +20,7 @@ pub fn run() {
         .manage(fs::WatcherManager::new())
         .manage(find_proxy::FindProxyManager::new())
         .manage(export::ExportManager::new())
+        .manage(sync::SyncManager::new())
         .setup(|app| {
             menu::setup(app)?;
             Ok(())
@@ -41,6 +43,9 @@ pub fn run() {
             export::start_export,
             export::cancel_export,
             export::get_today_date_folder,
+            sync::plan_folder_sync,
+            sync::start_folder_sync,
+            sync::cancel_folder_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

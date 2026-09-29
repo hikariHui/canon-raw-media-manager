@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # 需要完整 tag/commit 历史，供 GitHub 生成 Release Notes
+          # 需要完整 tag/commit 历史，供 release 正文按 tag 区间生成 git log
           fetch-depth: 0
 
       - name: Install pnpm
@@ -43,20 +43,37 @@ jobs:
 
       - name: Generate release notes
         id: notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          REPO="${{ github.repository }}"
           if [ "${{ github.ref_type }}" = "tag" ]; then
             TAG="${{ github.ref_name }}"
           else
             TAG="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
           fi
 
-          BODY=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
-            -f tag_name="$TAG" \
-            -f target_commitish="${{ github.sha }}" \
-            --jq .body)
+          PREV=$(git tag -l 'v*' --sort=-version:refname | awk -v t="$TAG" '
+            $0 == t { found=1; next }
+            found { print; exit }
+          ')
+
+          BODY="## 更新内容"$'\n\n'
+          if [ -n "$PREV" ]; then
+            LOG=$(git log "${PREV}..${TAG}" --pretty=format:"* %s ([%h](https://github.com/${REPO}/commit/%H))" --reverse --no-merges || true)
+            if [ -n "$LOG" ]; then
+              BODY+="${LOG}"$'\n'
+            else
+              BODY+="* 无新提交（与 ${PREV} 相比）"$'\n'
+            fi
+            BODY+=$'\n'"**对比**: https://github.com/${REPO}/compare/${PREV}...${TAG}"$'\n'
+          else
+            LOG=$(git log -1 --pretty=format:"* %s ([%h](https://github.com/${REPO}/commit/%H))" "$TAG" 2>/dev/null || true)
+            if [ -n "$LOG" ]; then
+              BODY+="${LOG}"$'\n'
+            else
+              BODY+="* （首个版本 tag，无上一版本可对比）"$'\n'
+            fi
+          fi
 
           DELIM="NOTES_EOF_$(openssl rand -hex 8)"
           {

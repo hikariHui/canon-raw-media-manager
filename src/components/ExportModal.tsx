@@ -162,7 +162,6 @@ export default function ExportModal({ open, onClose }: Props) {
       width={720}
       typewriter={false}
       maskClosable={!busy}
-      closable={!busy}
       onClose={handleClose}
       footer={null}
     >

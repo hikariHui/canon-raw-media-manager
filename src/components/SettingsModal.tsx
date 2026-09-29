@@ -18,7 +18,6 @@ export default function SettingsModal({ open, onClose }: Props) {
       width={640}
       typewriter={false}
       maskClosable
-      closable
       onClose={onClose}
       footer={
         <Button type="primary" onClick={onClose}>
