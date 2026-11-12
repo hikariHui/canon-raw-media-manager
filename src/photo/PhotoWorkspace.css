@@ -1,0 +1,30 @@
+.photo-workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.photo-sidebar {
+  flex-shrink: 0;
+  width: 320px;
+  overflow: hidden;
+  background: #f8f8f0;
+  border-right: 1px solid #d9d0c0;
+  box-shadow: 2px 0 8px rgb(61 52 40 / 6%);
+}
+
+.photo-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 16px 20px;
+  overflow: hidden;
+  background: #f0e8d8;
+}
+
+.photo-compare-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}

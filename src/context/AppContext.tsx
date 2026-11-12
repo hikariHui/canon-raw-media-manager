@@ -9,13 +9,16 @@ import React, {
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { notificationOpen } from "animal-island-ui";
 import {
   store,
   DURATION_CACHE_KEY,
   RAW_DIR_KEY,
   PROXY_DIR_KEY,
 } from "../utils/store";
+import { useAppMode } from "./ModeContext";
 import { ensureAllowedManagedDir } from "../utils/allowedDirs";
+import { onUndoComplete } from "../utils/oprationHistory";
 import { getProxyVideoPath } from "../utils/getProxyVideoPath";
 
 export interface FileItem {
@@ -51,6 +54,7 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  const { mode } = useAppMode();
   const [curCrmFile, setCurCrmFile] = useState("");
   const [rawDir, setRawDirState] = useState("");
   const [filesList, setFilesList] = useState<FileItem[]>([]);
@@ -63,6 +67,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const durationCache = useRef(new Map<string, number>());
   const saveCacheTimer = useRef<number | null>(null);
   const readDirTimer = useRef<number | null>(null);
+  const readDirGen = useRef(0);
   const rawDirRef = useRef(rawDir);
   const filesListRef = useRef(filesList);
   const proxySearchGen = useRef(0);
@@ -191,11 +196,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (dir: string) => {
       if (readDirTimer.current) clearTimeout(readDirTimer.current);
       readDirTimer.current = setTimeout(async () => {
+        const gen = ++readDirGen.current;
         if (!dir) return;
         try {
           const files: string[] = await invoke("read_directory_files", {
             dirPath: dir,
           });
+          if (gen !== readDirGen.current) return;
           const filteredFiles = files.filter(
             (f) =>
               f.toLowerCase().endsWith(".crm") ||
@@ -209,6 +216,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setFilesList(items);
           fetchDurationsAsync(items);
         } catch (error) {
+          if (gen !== readDirGen.current) return;
           console.error("读取目录失败:", error);
         }
       }, 300) as unknown as number;
@@ -335,31 +343,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
-  // Watch rawDir: read files + Tauri watch
+  // 仅视频模式监听/扫描 Raw 目录
   useEffect(() => {
-    if (!rawDir) return;
+    if (mode !== "video" || !rawDir) return;
     readDirectoryFiles(rawDir);
 
     let unwatchCalled = false;
-    const watchDir = async () => {
-      try {
-        await invoke("watch_directory", { dirPath: rawDir });
-      } catch (error) {
-        console.error(error);
-      }
-    };
-    watchDir();
+    let pollTimer: number | null = null;
+    let cancelled = false;
+
+    invoke("watch_directory", { dirPath: rawDir }).catch((error) => {
+      console.error("监听视频目录失败，改为定时刷新:", error);
+      if (cancelled) return;
+      notificationOpen({
+        type: "warning",
+        message: "目录监听失败",
+        description: "已改为定时刷新列表，外部增删文件可能稍有延迟。",
+        duration: 4,
+        key: "video-watch-fallback",
+      });
+      pollTimer = window.setInterval(() => {
+        if (rawDirRef.current) readDirectoryFiles(rawDirRef.current);
+      }, 5000);
+    });
 
     return () => {
+      cancelled = true;
+      if (pollTimer != null) clearInterval(pollTimer);
       if (!unwatchCalled) {
         unwatchCalled = true;
         invoke("unwatch_directory", { dirPath: rawDir }).catch(console.error);
       }
     };
-  }, [rawDir, readDirectoryFiles]);
+  }, [mode, rawDir, readDirectoryFiles]);
 
-  // Listen to file-change events
   useEffect(() => {
+    if (mode !== "video") return;
     const unlisten = listen(
       "file-change",
       (event: {
@@ -372,13 +391,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       unlisten.then((fn) => fn());
     };
+  }, [mode, readDirectoryFiles]);
+
+  // 全局撤销栈跨模式共用：不论当前 mode，有 rawDir 就刷新
+  useEffect(() => {
+    return onUndoComplete(() => {
+      if (rawDirRef.current) readDirectoryFiles(rawDirRef.current);
+    });
   }, [readDirectoryFiles]);
 
-  // Load duration cache on init when rawDir is set from store
+  // store 异步恢复 rawDir 后也要加载时长缓存（勿只在 mount 时空 rawDir 时跑一次）
   useEffect(() => {
-    if (rawDir) loadDurationCache(rawDir);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // only on mount
+    if (rawDir) void loadDurationCache(rawDir);
+  }, [rawDir, loadDurationCache]);
 
   // Save cache on page unload
   useEffect(() => {

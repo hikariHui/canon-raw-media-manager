@@ -12,6 +12,12 @@ export const RAW_DIR_KEY = "raw_dir";
 /** Proxy 文件目录路径 */
 export const PROXY_DIR_KEY = "proxy_dir";
 
+/** 工作区模式：video | photo */
+export const APP_MODE_KEY = "app_mode";
+
+/** 照片 Raw 目录（可与视频目录分开记忆） */
+export const PHOTO_DIR_KEY = "photo_dir";
+
 /** 存储卡根路径列表 */
 export const CARD_PATHS_KEY = "card_paths";
 

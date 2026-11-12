@@ -1,3 +1,4 @@
+mod cr3;
 mod export;
 mod ffmpeg;
 mod find_proxy;
@@ -46,6 +47,9 @@ pub fn run() {
             sync::plan_folder_sync,
             sync::start_folder_sync,
             sync::cancel_folder_sync,
+            cr3::scan_cr3_directory,
+            cr3::get_cr3_preview,
+            cr3::cleanup_photo_preview_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from "react";
 import { MdVideocamOff } from "react-icons/md";
 import { useAppContext } from "../context/AppContext";
+import { isAppDialogOpen } from "../utils/isAppDialogOpen";
 import "./ProxyPreview.css";
 
 export default function ProxyPreview() {
@@ -10,6 +11,16 @@ export default function ProxyPreview() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (isAppDialogOpen()) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
       if (e.key === " ") {
         e.preventDefault();
         if (videoRef.current) {

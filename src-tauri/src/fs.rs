@@ -20,9 +20,18 @@ pub fn read_directory_files(dir_path: String) -> Result<Vec<String>, String> {
         return Err(format!("路径不存在: {}", dir_path));
     }
 
+    // 只列文件，排除 deleted/starred 等子目录路径（与 scan_cr3 的 is_file 过滤一致）
     let files: Vec<String> = std::fs::read_dir(&dir_path)
         .map_err(|e| format!("读取目录失败: {}", e))?
-        .filter_map(|entry| entry.ok().map(|e| e.path().display().to_string()))
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let p = entry.path();
+            if p.is_file() {
+                Some(p.display().to_string())
+            } else {
+                None
+            }
+        })
         .collect();
 
     Ok(files)
@@ -69,7 +78,9 @@ pub fn watch_directory(
         return Err("目录不存在".to_string());
     }
 
-    // 检查是否已经在监听这个目录
+    // 检查是否已经在监听这个目录。
+    // 搁置：StrictMode 双挂载 / 快速切目录时，旧 unwatch 尚未摘掉会误报「已在监听」，
+    // 前端降级 5s 轮询。完整修法需幂等 watch 或 watch-disconnected 重连，暂不改语义。
     {
         let watchers = watcher_manager.watchers.lock().unwrap();
         if watchers.contains_key(&dir_path) {
@@ -86,9 +97,10 @@ pub fn watch_directory(
     let mut watcher =
         RecommendedWatcher::new(event_tx, Config::default()).map_err(|e| e.to_string())?;
 
-    // 开始监听目录
+    // 特性：NonRecursive。与 read_directory_files / scan_cr3_directory 一致只处理顶层，
+    // 勿改回 Recursive（否则子目录变更会触发重扫，但列表仍扫不到）。
     watcher
-        .watch(path, RecursiveMode::Recursive)
+        .watch(path, RecursiveMode::NonRecursive)
         .map_err(|e| e.to_string())?;
 
     // 保存停止信号发送器
@@ -139,7 +151,7 @@ pub fn watch_directory(
                     }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    // 通道断开，退出循环
+                    // 搁置：运行中断开时前端无感知、不会自动重连（仅首次 invoke 失败才轮询）。
                     println!("事件通道断开，停止监听: {}", dir_path_clone);
                     let mut watchers = watchers_clone.lock().unwrap();
                     watchers.remove(&dir_path_clone);

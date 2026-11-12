@@ -113,11 +113,43 @@
   position: relative;
   z-index: 1;
   display: flex;
-  gap: 24px;
+  gap: 16px;
   align-items: center;
   justify-content: space-between;
   max-width: 1400px;
   margin: 0 auto;
+}
+
+.mode-switch {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 4px;
+  background: rgb(255 249 230 / 35%);
+  border-radius: 999px;
+}
+
+.mode-btn {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #5a4030;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  transition:
+    background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mode-btn.is-active {
+  color: #3d3428;
+  background: #fff9e6;
+  box-shadow: 0 2px 6px rgb(61 52 40 / 15%);
 }
 
 /* 品牌区 */

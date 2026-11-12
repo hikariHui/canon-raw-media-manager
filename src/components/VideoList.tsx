@@ -1,9 +1,20 @@
 import { useState, useEffect, useRef } from "react";
-import { Button } from "animal-island-ui";
+import { Button, notificationOpen } from "animal-island-ui";
 import { MdVideocam, MdMyLocation } from "react-icons/md";
 import { useAppContext } from "../context/AppContext";
 import { deleteVideo, starVideo } from "../hooks/useMoveVideo";
+import { isAppDialogOpen } from "../utils/isAppDialogOpen";
 import "./VideoList.css";
+
+const tipMoveFailed = (err: unknown) => {
+  notificationOpen({
+    type: "error",
+    message: "操作未全部完成",
+    description: err instanceof Error ? err.message : String(err),
+    duration: 4,
+    key: "video-move-failed",
+  });
+};
 
 const getFileName = (path: string) => path.split(/[/\\]/).pop() || path;
 
@@ -25,6 +36,7 @@ export default function VideoList() {
   const filesListRef = useRef(filesList);
   const curCrmFileRef = useRef(curCrmFile);
   const proxyDirRef = useRef(proxyDir);
+  const movingRef = useRef(false);
 
   useEffect(() => {
     curIndexRef.current = curIndex;
@@ -75,17 +87,56 @@ export default function VideoList() {
   // Keyboard listeners
   useEffect(() => {
     const handler = async (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+      if (tag === "BUTTON" && (e.key === "Enter" || e.key === " ")) return;
+      if (isAppDialogOpen()) return;
+
       if (e.key === "ArrowUp") {
-        setCurIndex((i) => Math.max(i - 1, 0));
+        e.preventDefault();
+        setCurIndex((i) => {
+          if (!filesListRef.current.length) return -1;
+          if (i < 0) return 0;
+          return Math.max(i - 1, 0);
+        });
       } else if (e.key === "ArrowDown") {
-        setCurIndex((i) => Math.min(i + 1, filesListRef.current.length - 1));
+        e.preventDefault();
+        setCurIndex((i) => {
+          const len = filesListRef.current.length;
+          if (!len) return -1;
+          if (i < 0) return 0;
+          return Math.min(i + 1, len - 1);
+        });
       } else if (e.key === "Delete" || e.key === "Backspace") {
-        if (curCrmFileRef.current) {
-          await deleteVideo(curCrmFileRef.current, proxyDirRef.current);
+        if (curCrmFileRef.current && !movingRef.current) {
+          e.preventDefault();
+          movingRef.current = true;
+          try {
+            await deleteVideo(curCrmFileRef.current, proxyDirRef.current);
+          } catch (err) {
+            tipMoveFailed(err);
+          } finally {
+            movingRef.current = false;
+          }
         }
       } else if (e.key === "Enter") {
-        if (curCrmFileRef.current) {
-          await starVideo(curCrmFileRef.current, proxyDirRef.current);
+        if (curCrmFileRef.current && !movingRef.current) {
+          e.preventDefault();
+          movingRef.current = true;
+          try {
+            await starVideo(curCrmFileRef.current, proxyDirRef.current);
+          } catch (err) {
+            tipMoveFailed(err);
+          } finally {
+            movingRef.current = false;
+          }
         }
       }
     };

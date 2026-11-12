@@ -1,7 +1,11 @@
 .export-modal-body {
+  /* Modal body 是 align-items:flex-start，必须显式拉满，否则进度条随文案收缩 */
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  align-self: stretch;
+  width: 100%;
   max-width: 100%;
   max-height: min(70vh, 640px);
   padding: 4px 2px 8px;
@@ -13,6 +17,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
 }
@@ -176,6 +181,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
 }
@@ -217,6 +223,8 @@
 }
 
 .export-progress-sub {
+  width: 100%;
+  min-width: 0;
   height: 16px;
   overflow: hidden;
   text-overflow: ellipsis;

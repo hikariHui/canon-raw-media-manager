@@ -8,6 +8,7 @@ import ProxySearchModal from "./components/ProxySearchModal";
 import SettingsModal from "./components/SettingsModal";
 import SyncModal from "./components/SyncModal";
 import UpdateModal from "./components/UpdateModal";
+import { isAppDialogOpen } from "./utils/isAppDialogOpen";
 import { undo } from "./utils/oprationHistory";
 import "./App.css";
 
@@ -18,9 +19,19 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
-        undo();
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
+      if (e.repeat) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
       }
+      if (isAppDialogOpen()) return;
+      e.preventDefault();
+      void undo();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);

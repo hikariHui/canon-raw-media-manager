@@ -1,0 +1,40 @@
+.photo-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: #f8f8f0;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgb(61 52 40 / 8%);
+}
+
+.photo-toolbar-info {
+  font-size: 13px;
+  font-weight: 600;
+  color: #794f27;
+}
+
+.photo-toolbar-compare {
+  margin-left: 4px;
+  color: #9f927d;
+}
+
+.photo-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.photo-toolbar-actions .btn-danger {
+  color: #c45c4a !important;
+  border-color: #e0a399 !important;
+}
+
+.photo-toolbar-actions .btn-danger:not(:disabled):hover {
+  color: #a84838 !important;
+  background: rgb(196 92 74 / 10%) !important;
+}

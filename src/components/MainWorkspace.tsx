@@ -3,9 +3,11 @@ import VideoList from "./VideoList";
 import ProxyPreview from "./ProxyPreview";
 import VideoInfo from "./VideoInfo";
 import { useAppContext } from "../context/AppContext";
+import { useAppMode } from "../context/ModeContext";
+import PhotoWorkspace from "../photo/PhotoWorkspace";
 import "./MainWorkspace.css";
 
-export default function MainWorkspace() {
+function VideoWorkspace() {
   const { curCrmFile, curProxyFilePath } = useAppContext();
   const contentRef = useRef<HTMLDivElement | null>(null);
 
@@ -39,4 +41,9 @@ export default function MainWorkspace() {
       </div>
     </div>
   );
+}
+
+export default function MainWorkspace() {
+  const { mode } = useAppMode();
+  return mode === "photo" ? <PhotoWorkspace /> : <VideoWorkspace />;
 }

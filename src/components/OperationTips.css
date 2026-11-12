@@ -18,18 +18,6 @@
   align-items: center;
 }
 
-.tip-tag {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 4px 10px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #794f27;
-  background: #e6f9f6;
-  border-radius: 12px;
-}
-
 .tip-icon {
   font-size: 14px;
   color: #19c8b9;
@@ -43,6 +31,43 @@ kbd {
   border: 2px solid #d9d0c0;
   border-radius: 6px;
   box-shadow: 0 2px 0 #c4b89e;
+}
+
+.tip-tag {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #794f27;
+  background: #e6f9f6;
+  border-radius: 12px;
+  transition:
+    opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+    filter 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tip-tag-disabled {
+  color: #a89888;
+  pointer-events: auto;
+  cursor: default;
+  background: #efeae2;
+  opacity: 0.55;
+  filter: grayscale(0.35);
+}
+
+.tip-tag-disabled .tip-icon {
+  color: #b0a090;
+}
+
+.tip-tag-disabled kbd {
+  color: #9a8b7a;
+  background: #f3efe6;
+  border-color: #ddd4c6;
+  box-shadow: none;
 }
 
 .focus-alert {
