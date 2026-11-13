@@ -1,12 +1,18 @@
 //! CR3 内嵌 JPEG 抽取、EXIF 元数据与预览磁盘缓存。
+use image::ImageEncoder;
+use rawler::decoders::RawDecodeParams;
+use rawler::imgop::develop::RawDevelop;
+use rawler::rawsource::RawSource;
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const CACHE_DIR_NAME: &str = "photo-preview-cache";
 const INDEX_FILE: &str = "index.json";
@@ -35,8 +41,20 @@ pub struct PhotoMeta {
     pub path: String,
     pub file_name: String,
     pub datetime_ms: Option<i64>,
+    pub orientation: Option<u16>,
     pub continuous_drive: Option<i32>,
     pub burst_key: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct PhotoScanMetaEvent {
+    gen: u64,
+    photos: Vec<PhotoMeta>,
+}
+
+#[derive(Clone, Serialize)]
+struct PhotoScanDoneEvent {
+    gen: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,9 +181,11 @@ fn kind_str(kind: PreviewKind) -> &'static str {
     match kind {
         PreviewKind::Thumb => "thumb",
         // v2：优先 mdat 全尺寸 JPEG，旧 preview 缓存自动失效
-        PreviewKind::Preview => "preview_hq",
+        PreviewKind::Preview => "preview_hq_v3",
     }
 }
+
+const RAW_PREVIEW_CACHE_KIND: &str = "preview_raw_v2";
 
 fn read_u16_be(buf: &[u8], off: usize) -> Option<u16> {
     Some(u16::from_be_bytes([*buf.get(off)?, *buf.get(off + 1)?]))
@@ -186,6 +206,19 @@ fn read_u16(buf: &[u8], off: usize, be: bool) -> Option<u16> {
     } else {
         Some(u16::from_le_bytes([*buf.get(off)?, *buf.get(off + 1)?]))
     }
+}
+
+fn read_u64_be(buf: &[u8], off: usize) -> Option<u64> {
+    Some(u64::from_be_bytes([
+        *buf.get(off)?,
+        *buf.get(off + 1)?,
+        *buf.get(off + 2)?,
+        *buf.get(off + 3)?,
+        *buf.get(off + 4)?,
+        *buf.get(off + 5)?,
+        *buf.get(off + 6)?,
+        *buf.get(off + 7)?,
+    ]))
 }
 
 fn read_u32(buf: &[u8], off: usize, be: bool) -> Option<u32> {
@@ -277,11 +310,25 @@ fn walk_boxes(
     depth: usize,
     on_box: &mut dyn FnMut(&mut File, &BoxHeader) -> Result<(), String>,
 ) -> Result<(), String> {
+    walk_boxes_inner(file, start, end, depth, None, on_box)
+}
+
+fn walk_boxes_inner(
+    file: &mut File,
+    start: u64,
+    end: u64,
+    depth: usize,
+    stop_top_level: Option<&Cell<bool>>,
+    on_box: &mut dyn FnMut(&mut File, &BoxHeader) -> Result<(), String>,
+) -> Result<(), String> {
     if depth > 12 {
         return Ok(());
     }
     let mut cursor = start;
     while cursor + 8 <= end {
+        if depth == 0 && stop_top_level.is_some_and(|s| s.get()) {
+            break;
+        }
         let Some(hdr) = read_box_header(file, cursor)? else {
             break;
         };
@@ -315,8 +362,16 @@ fn walk_boxes(
         ) || (hdr.typ == *b"uuid"
             && (hdr.uuid == Some(UUID_CANON_META) || hdr.uuid == Some(UUID_PRVW)));
 
-        if is_container {
-            walk_boxes(file, hdr.payload_start, absolute_end, depth + 1, on_box)?;
+        let skip_recurse = depth == 0 && stop_top_level.is_some_and(|s| s.get());
+        if is_container && !skip_recurse {
+            walk_boxes_inner(
+                file,
+                hdr.payload_start,
+                absolute_end,
+                depth + 1,
+                None,
+                on_box,
+            )?;
         }
 
         if total == 0 {
@@ -334,7 +389,7 @@ fn find_jpeg_in_slice(data: &[u8]) -> Option<&[u8]> {
     let mut i = 0;
     while i + 2 < data.len() {
         if data[i] == 0xff && data[i + 1] == 0xd8 && data[i + 2] == 0xff {
-            // find EOI
+            // 必须找到 EOI，避免返回截断流写入缓存
             let mut j = i + 3;
             while j + 1 < data.len() {
                 if data[j] == 0xff && data[j + 1] == 0xd9 {
@@ -342,7 +397,8 @@ fn find_jpeg_in_slice(data: &[u8]) -> Option<&[u8]> {
                 }
                 j += 1;
             }
-            return Some(&data[i..]);
+            i += 1;
+            continue;
         }
         i += 1;
     }
@@ -370,7 +426,8 @@ fn largest_jpeg_in_slice(data: &[u8]) -> Option<&[u8]> {
                 j += 1;
             }
             if !found_eoi {
-                break;
+                // 无 EOI：跳过该 SOI，继续找后续完整 JPEG
+                i += 1;
             }
         } else {
             i += 1;
@@ -383,6 +440,189 @@ fn largest_jpeg_in_slice(data: &[u8]) -> Option<&[u8]> {
 const MDAT_JPEG_SCAN_MAX: u64 = 16 * 1024 * 1024;
 /// 小于该体积视为缩略图/PRVW，不当作高清预览
 const HQ_JPEG_MIN_BYTES: usize = 200_000;
+
+fn slice_child_box_payload<'a>(data: &'a [u8], fourcc: &[u8; 4]) -> Option<&'a [u8]> {
+    let mut off = 0usize;
+    while off + 8 <= data.len() {
+        let size = read_u32_be(data, off)? as usize;
+        if size < 8 || off.saturating_add(size) > data.len() {
+            break;
+        }
+        if data.get(off + 4..off + 8)? == fourcc {
+            return data.get(off + 8..off + size);
+        }
+        off += size;
+    }
+    None
+}
+
+fn find_box_payload_deep<'a>(data: &'a [u8], fourcc: &[u8; 4]) -> Option<&'a [u8]> {
+    if let Some(inner) = slice_child_box_payload(data, fourcc) {
+        return Some(inner);
+    }
+    let mut off = 0usize;
+    while off + 8 <= data.len() {
+        let size = read_u32_be(data, off).unwrap_or(0) as usize;
+        if size < 8 || off.saturating_add(size) > data.len() {
+            break;
+        }
+        let child = data.get(off + 8..off + size)?;
+        if let Some(found) = find_box_payload_deep(child, fourcc) {
+            return Some(found);
+        }
+        off += size;
+    }
+    None
+}
+
+fn moov_trak_payloads(moov_payload: &[u8]) -> Vec<&[u8]> {
+    let mut traks = Vec::new();
+    let mut off = 0usize;
+    while off + 8 <= moov_payload.len() {
+        let size = read_u32_be(moov_payload, off).unwrap_or(0) as usize;
+        if size < 8 || off.saturating_add(size) > moov_payload.len() {
+            break;
+        }
+        if moov_payload.get(off + 4..off + 8) == Some(b"trak") {
+            if let Some(body) = moov_payload.get(off + 8..off + size) {
+                traks.push(body);
+            }
+        }
+        off += size;
+    }
+    traks
+}
+
+fn stsz_first_sample_size(stsz: &[u8]) -> Option<u32> {
+    if stsz.len() < 12 {
+        return None;
+    }
+    let sample_size = read_u32_be(stsz, 4)?;
+    let count = read_u32_be(stsz, 8)?;
+    if count == 0 {
+        return None;
+    }
+    if sample_size != 0 {
+        return Some(sample_size);
+    }
+    if stsz.len() >= 16 {
+        read_u32_be(stsz, 12)
+    } else {
+        None
+    }
+}
+
+fn stco_first_offset(stco: &[u8]) -> Option<u64> {
+    if stco.len() < 12 {
+        return None;
+    }
+    let count = read_u32_be(stco, 4)?;
+    if count == 0 {
+        return None;
+    }
+    let off = read_u32_be(stco, 8)?;
+    Some(u64::from(off))
+}
+
+fn co64_first_offset(co64: &[u8]) -> Option<u64> {
+    if co64.len() < 16 {
+        return None;
+    }
+    let count = read_u32_be(co64, 4)?;
+    if count == 0 {
+        return None;
+    }
+    read_u64_be(co64, 8)
+}
+
+fn extract_jpeg_sample_from_trak(trak: &[u8]) -> Option<(u64, u64)> {
+    let has_jpeg_marker = trak.windows(4).any(|w| w == b"JPEG" || w == b"jpeg");
+    let stsz = find_box_payload_deep(trak, b"stsz")?;
+    let sample_size = u64::from(stsz_first_sample_size(stsz)?);
+    let offset = find_box_payload_deep(trak, b"co64")
+        .and_then(co64_first_offset)
+        .or_else(|| find_box_payload_deep(trak, b"stco").and_then(stco_first_offset))?;
+    if !has_jpeg_marker {
+        // 仍可能是 JPEG 轨：stsz+偏移即可
+        let has_stsd = find_box_payload_deep(trak, b"stsd").is_some();
+        if !has_stsd {
+            return None;
+        }
+    }
+    Some((offset, sample_size))
+}
+
+fn extract_hq_jpeg_from_moov_trak(file: &mut File, file_len: u64) -> Option<Vec<u8>> {
+    let mut moov: Option<(u64, u64)> = None;
+    let _ = walk_boxes(file, 0, file_len, 0, &mut |_, hdr| {
+        if moov.is_none() && &hdr.typ == b"moov" {
+            moov = Some((hdr.payload_start, hdr.payload_len));
+        }
+        Ok(())
+    });
+    let (start, len) = moov?;
+    let moov_data = read_file_region(file, start, len).ok()?;
+    let mut candidates: Vec<(u64, u64, bool)> = Vec::new();
+    for trak in moov_trak_payloads(&moov_data) {
+        let jpeg_marked = trak.windows(4).any(|w| w == b"JPEG");
+        if let Some((off, size)) = extract_jpeg_sample_from_trak(trak) {
+            candidates.push((off, size, jpeg_marked));
+        }
+    }
+    candidates.sort_by(|a, b| b.2.cmp(&a.2));
+    for (off, size, _) in candidates {
+        if size == 0 || size > 64 * 1024 * 1024 {
+            continue;
+        }
+        // Canon CR3 的 co64/stco 为文件绝对偏移（非相对 mdat）
+        let buf = read_file_region(file, off, size).ok()?;
+        if looks_like_complete_jpeg(&buf) {
+            return Some(buf);
+        }
+    }
+    None
+}
+
+fn looks_like_complete_jpeg(buf: &[u8]) -> bool {
+    if buf.len() < 4 || buf[0] != 0xff || buf[1] != 0xd8 {
+        return false;
+    }
+    // 允许 sample size 尾部少量 padding，在末尾窗口内找 EOI
+    let tail = buf.len().saturating_sub(64);
+    buf[tail..].windows(2).any(|w| w[0] == 0xff && w[1] == 0xd9)
+}
+
+/// 磁盘缓存命中校验：与 `looks_like_complete_jpeg` 一致（SOI + 末尾 64 字节窗口内 EOI）。
+fn cached_jpeg_file_ok(path: &Path) -> bool {
+    let Ok(meta) = fs::metadata(path) else {
+        return false;
+    };
+    let len = meta.len() as usize;
+    if len < 4 {
+        return false;
+    }
+    let Ok(mut f) = File::open(path) else {
+        return false;
+    };
+    let mut head = [0u8; 2];
+    if f.read_exact(&mut head).is_err() || head != [0xff, 0xd8] {
+        return false;
+    }
+    let window = len.min(64);
+    let start = (len - window) as u64;
+    if f.seek(SeekFrom::Start(start)).is_err() {
+        return false;
+    }
+    let mut tail = vec![0u8; window];
+    if f.read_exact(&mut tail).is_err() {
+        return false;
+    }
+    // 拼 SOI + 尾窗，复用同一套完整 JPEG 判定
+    let mut probe = Vec::with_capacity(2 + window);
+    probe.extend_from_slice(&head);
+    probe.extend_from_slice(&tail);
+    looks_like_complete_jpeg(&probe)
+}
 
 fn extract_hq_jpeg_from_mdat(file: &mut File, file_len: u64) -> Option<Vec<u8>> {
     let mut mdat: Option<(u64, u64)> = None;
@@ -405,6 +645,21 @@ fn extract_hq_jpeg_from_mdat(file: &mut File, file_len: u64) -> Option<Vec<u8>> 
     Some(jpeg.to_vec())
 }
 
+/// 按声明长度切片；必须通过完整 JPEG 校验，否则回退扫描。
+fn take_declared_jpeg(body: &[u8], jpeg_off: usize, jpeg_size: usize) -> Option<Vec<u8>> {
+    if jpeg_off + jpeg_size > body.len() {
+        return None;
+    }
+    if body.get(jpeg_off)? != &0xff || body.get(jpeg_off + 1)? != &0xd8 {
+        return None;
+    }
+    let slice = &body[jpeg_off..jpeg_off + jpeg_size];
+    if looks_like_complete_jpeg(slice) {
+        return Some(slice.to_vec());
+    }
+    None
+}
+
 fn extract_thmb_jpeg(data: &[u8]) -> Option<Vec<u8>> {
     let pos = data.windows(4).position(|w| w == b"THMB")?;
     let body = data.get(pos + 4..)?;
@@ -416,11 +671,8 @@ fn extract_thmb_jpeg(data: &[u8]) -> Option<Vec<u8>> {
     let jpeg_size = read_u32_be(body, 8)? as usize;
     // v0: extra 4 bytes before jpeg (offset 16); v1: jpeg often at 12 or 16
     for jpeg_off in [16usize, 12, 20] {
-        if jpeg_off + jpeg_size <= body.len()
-            && body[jpeg_off] == 0xff
-            && body[jpeg_off + 1] == 0xd8
-        {
-            return Some(body[jpeg_off..jpeg_off + jpeg_size].to_vec());
+        if let Some(jpeg) = take_declared_jpeg(body, jpeg_off, jpeg_size) {
+            return Some(jpeg);
         }
     }
     let _ = version;
@@ -433,8 +685,8 @@ fn extract_prvw_jpeg(payload: &[u8]) -> Option<Vec<u8>> {
         // unknown(4) + ?(2) + w(2) + h(2) + ?(2) + jpeg_size(4) + jpeg
         if body.len() >= 20 {
             let jpeg_size = read_u32_be(body, 16)? as usize;
-            if 20 + jpeg_size <= body.len() && body[20] == 0xff {
-                return Some(body[20..20 + jpeg_size].to_vec());
+            if let Some(jpeg) = take_declared_jpeg(body, 20, jpeg_size) {
+                return Some(jpeg);
             }
         }
         return find_jpeg_in_slice(body).map(|j| j.to_vec());
@@ -502,8 +754,39 @@ fn extract_named_preview(
     Ok(found)
 }
 
+fn thumb_quality_heavy(quality: Option<&str>) -> bool {
+    matches!(quality, Some("heavy"))
+}
+
+fn extract_thumb_heavy(file: &mut File, file_len: u64) -> Result<Option<Vec<u8>>, String> {
+    if let Some(thmb) = extract_named_preview(file, file_len, PreviewKind::Thumb)? {
+        return Ok(Some(thmb));
+    }
+    if let Some(prvw) = extract_named_preview(file, file_len, PreviewKind::Preview)? {
+        return Ok(Some(prvw));
+    }
+    let mut found: Option<Vec<u8>> = None;
+    walk_boxes(file, 0, file_len, 0, &mut |f, hdr| {
+        if found.is_some() {
+            return Ok(());
+        }
+        if hdr.typ == *b"uuid" && hdr.uuid == Some(UUID_CANON_META) {
+            let data = read_file_region(f, hdr.payload_start, hdr.payload_len)?;
+            if let Some(jpeg) = find_jpeg_in_slice(&data) {
+                found = Some(jpeg.to_vec());
+            }
+        }
+        Ok(())
+    })?;
+    Ok(found)
+}
+
 /// Extract embedded JPEG of given kind from CR3.
-pub fn extract_preview_jpeg(path: &Path, kind: PreviewKind) -> Result<Vec<u8>, String> {
+pub fn extract_preview_jpeg(
+    path: &Path,
+    kind: PreviewKind,
+    quality: Option<&str>,
+) -> Result<Vec<u8>, String> {
     let mut file = File::open(path).map_err(|e| format!("打开 CR3 失败: {e}"))?;
     let file_len = file
         .metadata()
@@ -511,21 +794,54 @@ pub fn extract_preview_jpeg(path: &Path, kind: PreviewKind) -> Result<Vec<u8>, S
         .len();
 
     if kind == PreviewKind::Preview {
-        // 优先 mdat 全尺寸 JPEG（通常远大于 PRVW 的 ~1620px）
+        if let Some(hq) = extract_hq_jpeg_from_moov_trak(&mut file, file_len) {
+            return Ok(hq);
+        }
         if let Some(hq) = extract_hq_jpeg_from_mdat(&mut file, file_len) {
             return Ok(hq);
         }
         if let Some(prvw) = extract_named_preview(&mut file, file_len, PreviewKind::Preview)? {
             return Ok(prvw);
         }
-        if let Ok(thumb) = extract_preview_jpeg(path, PreviewKind::Thumb) {
+        if let Ok(thumb) = extract_preview_jpeg(path, PreviewKind::Thumb, quality) {
             return Ok(thumb);
         }
         return Err("未在 CR3 中找到预览 JPEG".into());
     }
 
-    extract_named_preview(&mut file, file_len, PreviewKind::Thumb)?
-        .ok_or_else(|| "未在 CR3 中找到 THMB JPEG".into())
+    if thumb_quality_heavy(quality) {
+        extract_thumb_heavy(&mut file, file_len)?.ok_or_else(|| "未在 CR3 中找到 THMB JPEG".into())
+    } else {
+        extract_named_preview(&mut file, file_len, PreviewKind::Thumb)?
+            .ok_or_else(|| "未在 CR3 中找到 THMB JPEG".into())
+    }
+}
+
+fn extract_raw_developed_jpeg(path: &Path) -> Result<Vec<u8>, String> {
+    let rawfile = RawSource::new(path).map_err(|e| format!("打开 RAW 失败: {e}"))?;
+    let decoder = rawler::get_decoder(&rawfile).map_err(|e| format!("RAW 解码器失败: {e}"))?;
+    let params = RawDecodeParams::default();
+    let raw = decoder
+        .raw_image(&rawfile, &params, false)
+        .map_err(|e| format!("读取 RAW 图像失败: {e}"))?;
+    let dyn_img = RawDevelop::default()
+        .develop_intermediate(&raw)
+        .map_err(|e| format!("RAW 显影失败: {e}"))?
+        .to_dynamic_image()
+        .ok_or_else(|| "无法转换为 RGB 图像".to_string())?;
+    let rgb = dyn_img.to_rgb8();
+    let mut jpeg_bytes: Vec<u8> = Vec::new();
+    // 查焦用途尽量少压细节
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_bytes, 98);
+    encoder
+        .write_image(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|e| format!("JPEG 编码失败: {e}"))?;
+    Ok(jpeg_bytes)
 }
 
 #[derive(Default)]
@@ -533,8 +849,31 @@ struct ExifAccum {
     datetime_original: Option<String>,
     subsec: Option<String>,
     datetime: Option<String>,
+    orientation: Option<u16>,
     continuous_drive: Option<i32>,
     image_unique_id: Option<String>,
+}
+
+fn orientation_from_exif(value_bytes: &[u8], be: bool) -> Option<u16> {
+    if value_bytes.len() >= 2 {
+        return read_u16(value_bytes, 0, be);
+    }
+    None
+}
+
+fn exif_meta_core_ready(accum: &ExifAccum) -> bool {
+    let has_dt = accum.datetime_original.is_some() || accum.datetime.is_some();
+    // ImageUniqueID 用于 burst_key；尽量在同一次 meta 扫描里收齐
+    has_dt && accum.orientation.is_some() && accum.image_unique_id.is_some()
+}
+
+fn apply_cmt_blobs_to_accum(blobs: &[Vec<u8>], accum: &mut ExifAccum) {
+    for blob in blobs {
+        parse_tiff_ifds(blob, accum);
+        if blob.len() >= 2 && !blob.starts_with(b"II") && !blob.starts_with(b"MM") {
+            parse_canon_makernotes(blob, accum);
+        }
+    }
 }
 
 fn parse_tiff_ifds(data: &[u8], accum: &mut ExifAccum) {
@@ -603,6 +942,11 @@ fn parse_tiff_ifds(data: &[u8], accum: &mut ExifAccum) {
                 0x9291 => {
                     if let Some(s) = ascii_tag(value_bytes) {
                         accum.subsec = Some(s);
+                    }
+                }
+                0x0112 => {
+                    if let Some(v) = orientation_from_exif(value_bytes, be) {
+                        accum.orientation = Some(v);
                     }
                 }
                 0xA420 => {
@@ -683,6 +1027,11 @@ fn parse_one_ifd(data: &[u8], ifd_offset: usize, be: bool, accum: &mut ExifAccum
             0x9291 => {
                 if let Some(s) = ascii_tag(value_bytes) {
                     accum.subsec = Some(s);
+                }
+            }
+            0x0112 => {
+                if let Some(v) = orientation_from_exif(value_bytes, be) {
+                    accum.orientation = Some(v);
                 }
             }
             0xA420 => {
@@ -854,38 +1203,62 @@ pub fn read_photo_meta(path: &Path) -> Result<PhotoMeta, String> {
 
     let mut accum = ExifAccum::default();
     let mut cmt_blobs: Vec<Vec<u8>> = Vec::new();
+    let stop_top_level = Cell::new(false);
 
-    walk_boxes(&mut file, 0, file_len, 0, &mut |f, hdr| {
-        if matches!(&hdr.typ, b"CMT1" | b"CMT2" | b"CMT3") {
-            let data = read_file_region(f, hdr.payload_start, hdr.payload_len.min(512 * 1024))?;
-            cmt_blobs.push(data);
-        }
-        if hdr.typ == *b"uuid" && hdr.uuid == Some(UUID_CANON_META) {
-            let data =
-                read_file_region(f, hdr.payload_start, hdr.payload_len.min(2 * 1024 * 1024))?;
-            // Find nested CMT boxes
-            let mut off = 0usize;
-            while off + 8 <= data.len() {
-                let size = read_u32_be(&data, off).unwrap_or(0) as usize;
-                if size < 8 || off + size > data.len() {
-                    break;
-                }
-                let typ = &data[off + 4..off + 8];
-                if matches!(typ, b"CMT1" | b"CMT2" | b"CMT3") {
-                    cmt_blobs.push(data[off + 8..off + size].to_vec());
-                }
-                off += size;
+    walk_boxes_inner(
+        &mut file,
+        0,
+        file_len,
+        0,
+        Some(&stop_top_level),
+        &mut |f, hdr| {
+            if stop_top_level.get() {
+                return Ok(());
             }
-        }
-        Ok(())
-    })?;
+            if &hdr.typ == b"mdat" {
+                return Ok(());
+            }
+            if matches!(&hdr.typ, b"CMT1" | b"CMT2" | b"CMT3") {
+                let data = read_file_region(f, hdr.payload_start, hdr.payload_len.min(512 * 1024))?;
+                cmt_blobs.push(data);
+                apply_cmt_blobs_to_accum(&cmt_blobs, &mut accum);
+                if exif_meta_core_ready(&accum) {
+                    stop_top_level.set(true);
+                }
+                return Ok(());
+            }
+            if hdr.typ == *b"uuid" && hdr.uuid == Some(UUID_CANON_META) {
+                let cap = if exif_meta_core_ready(&accum) {
+                    256 * 1024
+                } else if accum.orientation.is_some() || accum.datetime_original.is_some() {
+                    512 * 1024
+                } else {
+                    2 * 1024 * 1024
+                };
+                let data = read_file_region(f, hdr.payload_start, hdr.payload_len.min(cap))?;
+                let mut off = 0usize;
+                while off + 8 <= data.len() {
+                    let size = read_u32_be(&data, off).unwrap_or(0) as usize;
+                    if size < 8 || off + size > data.len() {
+                        break;
+                    }
+                    let typ = &data[off + 4..off + 8];
+                    if matches!(typ, b"CMT1" | b"CMT2" | b"CMT3") {
+                        cmt_blobs.push(data[off + 8..off + size].to_vec());
+                    }
+                    off += size;
+                }
+                apply_cmt_blobs_to_accum(&cmt_blobs, &mut accum);
+                if exif_meta_core_ready(&accum) {
+                    stop_top_level.set(true);
+                }
+            }
+            Ok(())
+        },
+    )?;
 
-    for blob in &cmt_blobs {
-        parse_tiff_ifds(blob, &mut accum);
-        // CMT3 may be MakerNotes-only IFD
-        if blob.len() >= 2 && !blob.starts_with(b"II") && !blob.starts_with(b"MM") {
-            parse_canon_makernotes(blob, &mut accum);
-        }
+    if !cmt_blobs.is_empty() {
+        apply_cmt_blobs_to_accum(&cmt_blobs, &mut accum);
     }
 
     let dt_str = accum.datetime_original.or(accum.datetime);
@@ -893,24 +1266,83 @@ pub fn read_photo_meta(path: &Path) -> Result<PhotoMeta, String> {
         .as_deref()
         .and_then(|d| parse_datetime_ms(d, accum.subsec.as_deref()));
 
-    // Burst key: prefer ImageUniqueID only when ContinuousDrive indicates continuous —
-    // actually ImageUniqueID is per-image. Use time-bucket key when continuous.
-    // Plan: burst_key optional from true burst id; else None and frontend clusters.
-    let burst_key = None;
+    // R5m2 实测：ImageUniqueID 前 2 字节随帧变化，[2..] 在同一次连拍内稳定。
+    // 用 [2..] 作为 burst_key；单张也会有唯一后缀，groupBursts 里单元素组即可。
+    let burst_key = accum
+        .image_unique_id
+        .as_deref()
+        .and_then(burst_key_from_image_unique_id);
 
     Ok(PhotoMeta {
         path: path.display().to_string(),
         file_name,
         datetime_ms,
+        orientation: accum.orientation,
         continuous_drive: accum.continuous_drive,
         burst_key,
     })
 }
 
+/// Canon ImageUniqueID（16 字节 hex）→ 连拍键：去掉前 2 字节。
+fn burst_key_from_image_unique_id(uid: &str) -> Option<String> {
+    let hex: String = uid
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+    if hex.len() < 8 {
+        return None;
+    }
+    Some(hex[4..].to_string())
+}
+
+fn collect_cr3_paths(dir_path: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut paths: Vec<PathBuf> = fs::read_dir(dir_path)
+        .map_err(|e| format!("读取目录失败: {e}"))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x.eq_ignore_ascii_case("cr3"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    paths.sort_by(|a, b| {
+        let a_name = a.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let b_name = b.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        a_name.cmp(b_name)
+    });
+    Ok(paths)
+}
+
+fn photo_meta_stub(path: &Path, err: Option<&str>) -> PhotoMeta {
+    if let Some(e) = err {
+        eprintln!("读取元数据失败 {}: {e}", path.display());
+    }
+    PhotoMeta {
+        path: path.display().to_string(),
+        file_name: path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string(),
+        datetime_ms: None,
+        orientation: None,
+        continuous_drive: None,
+        burst_key: None,
+    }
+}
+
 fn touch_and_evict(root: &Path, key: &str, kind: PreviewKind, file_name: &str, size: u64) {
+    touch_and_evict_kind(root, key, kind_str(kind), file_name, size);
+}
+
+fn touch_and_evict_kind(root: &Path, key: &str, kind: &str, file_name: &str, size: u64) {
     let mut guard = cache_state().lock().unwrap();
     let now = now_secs();
-    let kind_s = kind_str(kind).to_string();
+    let kind_s = kind.to_string();
 
     if let Some(e) = guard
         .index
@@ -1003,11 +1435,16 @@ fn cached_path(root: &Path, key: &str, kind: PreviewKind) -> PathBuf {
     root.join(format!("{}_{}.jpg", key, kind_str(kind)))
 }
 
+fn cached_path_kind(root: &Path, key: &str, kind: &str) -> PathBuf {
+    root.join(format!("{}_{}.jpg", key, kind))
+}
+
 #[tauri::command]
 pub async fn get_cr3_preview(
     app: AppHandle,
     path: String,
     kind: PreviewKind,
+    quality: Option<String>,
 ) -> Result<String, String> {
     let path_buf = PathBuf::from(&path);
     if !path_buf.exists() {
@@ -1019,15 +1456,18 @@ pub async fn get_cr3_preview(
     let out = cached_path(&root, &key, kind);
 
     if out.exists() {
-        let size = out.metadata().map(|m| m.len()).unwrap_or(0);
-        touch_and_evict(
-            &root,
-            &key,
-            kind,
-            out.file_name().unwrap().to_string_lossy().as_ref(),
-            size,
-        );
-        return Ok(out.display().to_string());
+        if cached_jpeg_file_ok(&out) {
+            let size = out.metadata().map(|m| m.len()).unwrap_or(0);
+            touch_and_evict(
+                &root,
+                &key,
+                kind,
+                out.file_name().unwrap().to_string_lossy().as_ref(),
+                size,
+            );
+            return Ok(out.display().to_string());
+        }
+        let _ = fs::remove_file(&out);
     }
 
     let lock_key = format!("{}:{}", key, kind_str(kind));
@@ -1037,12 +1477,13 @@ pub async fn get_cr3_preview(
         let key = key.clone();
         let out = out.clone();
         let lock_key = lock_key.clone();
+        let quality_ref = quality.clone();
         move || -> Result<String, String> {
             let lock = preview_extract_lock(&lock_key);
             let result = (|| {
                 let _guard = lock.lock().unwrap();
                 // 双检：等待期间可能已被其他任务写好
-                if out.exists() {
+                if out.exists() && cached_jpeg_file_ok(&out) {
                     let size = out.metadata().map(|m| m.len()).unwrap_or(0);
                     touch_and_evict(
                         &root,
@@ -1053,7 +1494,10 @@ pub async fn get_cr3_preview(
                     );
                     return Ok(out.display().to_string());
                 }
-                let jpeg = extract_preview_jpeg(&path_buf, kind)?;
+                if out.exists() {
+                    let _ = fs::remove_file(&out);
+                }
+                let jpeg = extract_preview_jpeg(&path_buf, kind, quality_ref.as_deref())?;
                 {
                     let mut f = File::create(&out).map_err(|e| format!("写缓存失败: {e}"))?;
                     f.write_all(&jpeg).map_err(|e| format!("写缓存失败: {e}"))?;
@@ -1079,6 +1523,183 @@ pub async fn get_cr3_preview(
     Ok(out_display)
 }
 
+#[tauri::command]
+pub async fn get_cr3_raw_preview(app: AppHandle, path: String) -> Result<String, String> {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        return Err(format!("文件不存在: {path}"));
+    }
+    let root = cache_root(&app)?;
+    ensure_index_loaded(&root);
+    let key = content_key(&path_buf)?;
+    let out = cached_path_kind(&root, &key, RAW_PREVIEW_CACHE_KIND);
+
+    if out.exists() {
+        if cached_jpeg_file_ok(&out) {
+            let size = out.metadata().map(|m| m.len()).unwrap_or(0);
+            touch_and_evict_kind(
+                &root,
+                &key,
+                RAW_PREVIEW_CACHE_KIND,
+                out.file_name().unwrap().to_string_lossy().as_ref(),
+                size,
+            );
+            return Ok(out.display().to_string());
+        }
+        let _ = fs::remove_file(&out);
+    }
+
+    let lock_key = format!("{key}:{RAW_PREVIEW_CACHE_KIND}");
+    let out_display = tauri::async_runtime::spawn_blocking({
+        let path_buf = path_buf.clone();
+        let root = root.clone();
+        let key = key.clone();
+        let out = out.clone();
+        let lock_key = lock_key.clone();
+        move || -> Result<String, String> {
+            let lock = preview_extract_lock(&lock_key);
+            let result = (|| {
+                let _guard = lock.lock().unwrap();
+                if out.exists() && cached_jpeg_file_ok(&out) {
+                    let size = out.metadata().map(|m| m.len()).unwrap_or(0);
+                    touch_and_evict_kind(
+                        &root,
+                        &key,
+                        RAW_PREVIEW_CACHE_KIND,
+                        out.file_name().unwrap().to_string_lossy().as_ref(),
+                        size,
+                    );
+                    return Ok(out.display().to_string());
+                }
+                if out.exists() {
+                    let _ = fs::remove_file(&out);
+                }
+                let jpeg = extract_raw_developed_jpeg(&path_buf)?;
+                {
+                    let mut f = File::create(&out).map_err(|e| format!("写缓存失败: {e}"))?;
+                    f.write_all(&jpeg).map_err(|e| format!("写缓存失败: {e}"))?;
+                }
+                let size = jpeg.len() as u64;
+                touch_and_evict_kind(
+                    &root,
+                    &key,
+                    RAW_PREVIEW_CACHE_KIND,
+                    out.file_name().unwrap().to_string_lossy().as_ref(),
+                    size,
+                );
+                Ok(out.display().to_string())
+            })();
+            drop(lock);
+            release_preview_extract_lock(&lock_key);
+            result
+        }
+    })
+    .await
+    .map_err(|e| format!("RAW 预览任务失败: {e}"))??;
+
+    Ok(out_display)
+}
+
+/// 仅列出顶层 `.cr3` 文件名，不读元数据。
+#[tauri::command]
+pub fn list_cr3_directory(dir: String) -> Result<Vec<PhotoMeta>, String> {
+    if dir.is_empty() {
+        return Err("路径不能为空".into());
+    }
+    let dir_path = PathBuf::from(&dir);
+    if !dir_path.is_dir() {
+        return Err(format!("不是目录: {dir}"));
+    }
+    Ok(collect_cr3_paths(&dir_path)?
+        .into_iter()
+        .map(|p| PhotoMeta {
+            path: p.display().to_string(),
+            file_name: p
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string(),
+            datetime_ms: None,
+            orientation: None,
+            continuous_drive: None,
+            burst_key: None,
+        })
+        .collect())
+}
+
+/// 最新一次 enrich 的 gen；旧任务在分片间隙看到不匹配则提前结束，避免占 CPU。
+static ENRICH_GEN: AtomicU64 = AtomicU64::new(0);
+
+fn advance_enrich_gen(gen: u64) -> bool {
+    loop {
+        let cur = ENRICH_GEN.load(Ordering::SeqCst);
+        if gen < cur {
+            return false;
+        }
+        if ENRICH_GEN
+            .compare_exchange(cur, gen, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            return true;
+        }
+    }
+}
+
+/// 仅推进 enrich gen，用于清空目录 / 切换时作废仍在跑的旧扫描。
+#[tauri::command]
+pub fn cancel_cr3_enrich(gen: u64) {
+    let _ = advance_enrich_gen(gen);
+}
+
+/// 渐进式补齐元数据：按与 `list_cr3_directory` 相同顺序分批 `read_photo_meta` 并发射事件。
+#[tauri::command]
+pub async fn enrich_cr3_directory(app: AppHandle, dir: String, gen: u64) -> Result<(), String> {
+    if dir.is_empty() {
+        return Err("路径不能为空".into());
+    }
+    let dir_path = PathBuf::from(&dir);
+    if !dir_path.is_dir() {
+        return Err(format!("不是目录: {dir}"));
+    }
+    // 只允许更新为「不小于当前」的 gen，避免晚到的旧任务覆盖新任务
+    if !advance_enrich_gen(gen) {
+        // 仍发 done，避免前端 enriching 卡在 true（该 gen 若已过期会被前端忽略）
+        let _ = app.emit("photo-scan-done", PhotoScanDoneEvent { gen });
+        return Ok(());
+    }
+    let paths = collect_cr3_paths(&dir_path)?;
+
+    for chunk in paths.chunks(8) {
+        if ENRICH_GEN.load(Ordering::SeqCst) != gen {
+            let _ = app.emit("photo-scan-done", PhotoScanDoneEvent { gen });
+            return Ok(());
+        }
+        let owned: Vec<PathBuf> = chunk.to_vec();
+        let photos = tauri::async_runtime::spawn_blocking(move || {
+            owned
+                .iter()
+                .map(|p| match read_photo_meta(p) {
+                    Ok(m) => m,
+                    Err(e) => photo_meta_stub(p, Some(&e)),
+                })
+                .collect::<Vec<PhotoMeta>>()
+        })
+        .await
+        .map_err(|e| format!("元数据补齐任务失败: {e}"))?;
+
+        if ENRICH_GEN.load(Ordering::SeqCst) != gen {
+            let _ = app.emit("photo-scan-done", PhotoScanDoneEvent { gen });
+            return Ok(());
+        }
+        app.emit("photo-scan-meta", PhotoScanMetaEvent { gen, photos })
+            .map_err(|e| format!("发射 photo-scan-meta 失败: {e}"))?;
+    }
+
+    // 正常完成或末尾再被作废：都发 done，前端按 gen 过滤
+    let _ = app.emit("photo-scan-done", PhotoScanDoneEvent { gen });
+    Ok(())
+}
+
 /// 仅扫描目录顶层 `.cr3`（非递归）。
 /// 与 `watch_directory(NonRecursive)` / 视频 `read_directory_files` 一致：
 /// 相机导出通常为平坦目录；刻意不扫子文件夹，避免与监听范围不一致。
@@ -1092,19 +1713,7 @@ pub async fn scan_cr3_directory(dir: String) -> Result<Vec<PhotoMeta>, String> {
         return Err(format!("不是目录: {dir}"));
     }
 
-    // 顶层 only，见上方文档注释
-    let paths: Vec<PathBuf> = fs::read_dir(&dir_path)
-        .map_err(|e| format!("读取目录失败: {e}"))?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| {
-            p.is_file()
-                && p.extension()
-                    .and_then(|x| x.to_str())
-                    .map(|x| x.eq_ignore_ascii_case("cr3"))
-                    .unwrap_or(false)
-        })
-        .collect();
+    let paths = collect_cr3_paths(&dir_path)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let mut result = Vec::with_capacity(paths.len());
@@ -1119,20 +1728,7 @@ pub async fn scan_cr3_directory(dir: String) -> Result<Vec<PhotoMeta>, String> {
                     .iter()
                     .filter_map(|p| match read_photo_meta(p) {
                         Ok(m) => Some(m),
-                        Err(e) => {
-                            eprintln!("读取元数据失败 {}: {e}", p.display());
-                            Some(PhotoMeta {
-                                path: p.display().to_string(),
-                                file_name: p
-                                    .file_name()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or("")
-                                    .to_string(),
-                                datetime_ms: None,
-                                continuous_drive: None,
-                                burst_key: None,
-                            })
-                        }
+                        Err(e) => Some(photo_meta_stub(p, Some(&e))),
                     })
                     .collect::<Vec<_>>()
             }));
@@ -1157,7 +1753,7 @@ pub async fn scan_cr3_directory(dir: String) -> Result<Vec<PhotoMeta>, String> {
 }
 
 fn is_preview_cache_kind(k: &str) -> bool {
-    k == "preview" || k == "preview_hq"
+    k == "preview" || k == "preview_hq" || k == "preview_hq_v3" || k == RAW_PREVIEW_CACHE_KIND
 }
 
 fn run_cache_maintenance(root: &Path) {
@@ -1251,5 +1847,26 @@ mod tests {
         let j = find_jpeg_in_slice(&data).unwrap();
         assert_eq!(j[0], 0xff);
         assert_eq!(j[j.len() - 1], 0xd9);
+    }
+
+    #[test]
+    fn burst_key_from_r5m2_image_unique_id() {
+        // 同连拍：前 2 字节不同，[2..] 相同
+        let a = "b0ceba1009204ccc993a2ceadbbe192c";
+        let b = "b3ceba1009204ccc993a2ceadbbe192c";
+        let c = "d6ce962d09204ccc993a2ceadbbe192c";
+        let d = "29cf962d09204ccc993a2ceadbbe192c"; // b1 也跳了，仍同连拍
+        assert_eq!(
+            burst_key_from_image_unique_id(a).unwrap(),
+            burst_key_from_image_unique_id(b).unwrap()
+        );
+        assert_eq!(
+            burst_key_from_image_unique_id(c).unwrap(),
+            burst_key_from_image_unique_id(d).unwrap()
+        );
+        assert_ne!(
+            burst_key_from_image_unique_id(a).unwrap(),
+            burst_key_from_image_unique_id(c).unwrap()
+        );
     }
 }

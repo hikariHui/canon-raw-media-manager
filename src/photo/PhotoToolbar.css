@@ -17,9 +17,15 @@
   color: #794f27;
 }
 
-.photo-toolbar-compare {
+.photo-toolbar-compare,
+.photo-toolbar-zoom {
   margin-left: 4px;
   color: #9f927d;
+}
+
+.photo-toolbar-zoom strong {
+  font-variant-numeric: tabular-nums;
+  color: #794f27;
 }
 
 .photo-toolbar-actions {

@@ -1,24 +1,58 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Skeleton } from "animal-island-ui";
 import { MdStar } from "react-icons/md";
 import { MAX_COMPARE, usePhotoContext } from "./PhotoContext";
-import { useCr3Preview } from "./useCr3Preview";
+import { setRawPreviewPriority, useCr3Preview } from "./useCr3Preview";
+import { orientationCss, orientationSwapsAxes } from "./orientationCss";
 import "./SyncCompareView.css";
+
+/** 相对物理像素达到 100% 即开始 RAW */
+const RAW_NATIVE_ZOOM = 1;
+const MAX_SCALE = 32;
+const MIN_SCALE = 0.05;
 
 function ComparePane({
   path,
+  orientation,
   onToggleKeep,
   allowKeep,
+  useRaw,
+  onReportFit,
+  onReportWantRaw,
 }: {
   path: string;
+  orientation: number | null;
   onToggleKeep: (path: string) => void;
-  /** 仅正式对比（comparePaths 非空）允许勾选保留 */
   allowKeep: boolean;
+  useRaw: boolean;
+  /** 上报本格适应倍率；卸载时传 null 移除 */
+  onReportFit: (path: string, fit: number | null) => void;
+  /** 上报是否仍要拉 RAW（切 JPG 时为 false，便于踢出优先级） */
+  onReportWantRaw: (path: string, want: boolean) => void;
 }) {
-  const { syncViewport, setSyncViewport, keepPaths } = usePhotoContext();
-  const { url, loading, error } = useCr3Preview(path, "preview", true);
+  const { syncViewport, setSyncViewport, keepPaths, fitNativeZoom } =
+    usePhotoContext();
+  const jpeg = useCr3Preview(path, "preview", true);
+  /** RAW 就绪后默认用 RAW；点标签可切回 JPG（切 JPG 时不占 RAW 槽） */
+  const [preferRaw, setPreferRaw] = useState(true);
+  useEffect(() => {
+    if (useRaw) setPreferRaw(true);
+  }, [useRaw, path]);
+  const wantRaw = useRaw && preferRaw;
+  useEffect(() => {
+    onReportWantRaw(path, wantRaw);
+    return () => onReportWantRaw(path, false);
+  }, [path, wantRaw, onReportWantRaw]);
+  const raw = useCr3Preview(path, "raw", wantRaw);
+  const showingRaw = Boolean(wantRaw && raw.url);
+  const url = showingRaw ? raw.url! : jpeg.url;
+  const pendingRaw = wantRaw && raw.loading && !raw.url;
+  const loading = !url && (jpeg.loading || pendingRaw);
+  const error = !url && !pendingRaw && jpeg.error && !(wantRaw && raw.loading);
   const name = path.split(/[/\\]/).pop() ?? path;
   const kept = allowKeep && keepPaths.has(path);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const gestureRef = useRef<{
     x: number;
     y: number;
@@ -26,6 +60,56 @@ function ComparePane({
     vy: number;
     moved: boolean;
   } | null>(null);
+
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  // 与父级 nativeZoom 一致：适应未就绪时为 0，不用假 1
+  const effectiveScale =
+    syncViewport.scale > 0 ? syncViewport.scale : (fitNativeZoom ?? 0);
+  const fitReady = effectiveScale > 0;
+
+  const measureFit = useCallback(() => {
+    const img = imgRef.current;
+    if (!img?.naturalWidth || !img.naturalHeight) return;
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    setNatural({ w: nw, h: nh });
+
+    const viewport = img.closest(
+      ".compare-pane-viewport",
+    ) as HTMLElement | null;
+    const box = viewport ?? img.parentElement;
+    if (!box) return;
+    const pw = box.clientWidth;
+    const ph = box.clientHeight;
+    if (pw <= 0 || ph <= 0) return;
+
+    const swap = orientationSwapsAxes(orientation);
+    const cssW = (swap ? nh : nw) / dpr;
+    const cssH = (swap ? nw : nh) / dpr;
+    const fit = Math.min(pw / cssW, ph / cssH);
+    if (!(fit > 0)) return;
+    onReportFit(path, fit);
+  }, [dpr, orientation, onReportFit, path]);
+
+  useEffect(() => {
+    measureFit();
+    const onResize = () => measureFit();
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      onReportFit(path, null);
+    };
+  }, [measureFit, url, onReportFit, path]);
+
+  const imgLayoutStyle: React.CSSProperties = natural
+    ? {
+        ...orientationCss(orientation),
+        width: natural.w / dpr,
+        height: natural.h / dpr,
+        maxWidth: "none",
+        maxHeight: "none",
+      }
+    : { ...orientationCss(orientation) };
 
   return (
     <div
@@ -73,31 +157,73 @@ function ComparePane({
     >
       <div className="compare-pane-label">
         <span className="compare-pane-name">{name}</span>
-        {kept && (
-          <span className="compare-pane-keep-badge">
-            <MdStar /> 保留
-          </span>
-        )}
+        <span className="compare-pane-badges">
+          {useRaw && raw.url && (
+            <button
+              type="button"
+              className={`compare-pane-raw-badge is-toggle ${showingRaw ? "" : "is-jpg"}`}
+              title={
+                showingRaw
+                  ? "当前 RAW 细节，点击切回 JPG 预览"
+                  : "当前 JPG 预览，点击切回 RAW 细节"
+              }
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setPreferRaw((v) => !v);
+              }}
+            >
+              {showingRaw ? "RAW 细节" : "JPG 预览"}
+            </button>
+          )}
+          {wantRaw && raw.loading && !raw.url && (
+            <span
+              className="compare-pane-raw-badge is-loading"
+              title="正在显影 RAW"
+            >
+              RAW 解析中…
+            </span>
+          )}
+          {wantRaw && raw.error && !raw.url && (
+            <span
+              className="compare-pane-raw-badge is-error"
+              title={raw.errorMessage ?? ""}
+            >
+              RAW 失败
+            </span>
+          )}
+          {kept && (
+            <span className="compare-pane-keep-badge">
+              <MdStar /> 保留
+            </span>
+          )}
+        </span>
       </div>
       <div className="compare-pane-viewport">
         {url ? (
           <div
             className="compare-pane-stage"
             style={{
-              transform: `translate(${syncViewport.x}px, ${syncViewport.y}px) scale(${syncViewport.scale})`,
+              // fit 未就绪前透明，避免用 scale(1) 造成「已放大」错觉
+              opacity: fitReady ? 1 : 0,
+              transform: `translate(${syncViewport.x}px, ${syncViewport.y}px) scale(${fitReady ? effectiveScale : 1})`,
             }}
           >
-            <img src={url} alt={name} draggable={false} />
+            <img
+              ref={imgRef}
+              src={url}
+              alt={name}
+              draggable={false}
+              style={imgLayoutStyle}
+              onLoad={measureFit}
+            />
           </div>
+        ) : loading ? (
+          <Skeleton variant="rect" active width="100%" heightValue="100%" />
         ) : error ? (
           <div className="compare-pane-empty">无法加载预览</div>
         ) : (
-          <Skeleton
-            variant="rect"
-            active={loading}
-            width="100%"
-            heightValue="100%"
-          />
+          <Skeleton variant="rect" active width="100%" heightValue="100%" />
         )}
       </div>
     </div>
@@ -106,6 +232,7 @@ function ComparePane({
 
 export default function SyncCompareView() {
   const {
+    photos,
     comparePaths,
     activeGroup,
     selectedPaths,
@@ -113,6 +240,8 @@ export default function SyncCompareView() {
     syncViewport,
     setSyncViewport,
     resetSyncViewport,
+    fitNativeZoom,
+    setFitNativeZoom,
     toggleKeep,
   } = usePhotoContext();
   const dragRef = useRef<{
@@ -121,46 +250,179 @@ export default function SyncCompareView() {
     vx: number;
     vy: number;
   } | null>(null);
+  const [rawUnlocked, setRawUnlocked] = useState<Set<string>>(() => new Set());
+  const [wantRawPaths, setWantRawPaths] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const fitByPathRef = useRef<Map<string, number>>(new Map());
 
-  // 特性：comparePaths 为空时回退预览（不算正式对比；预览态禁用 keep）。
-  // 有选中时优先锚点/任一选中；否则组内第一张。
   const isFormalCompare = comparePaths.length > 0;
-  const paths = (() => {
+  const paths = useMemo(() => {
     if (isFormalCompare) return comparePaths;
     if (selectedPaths.size > 0) {
       if (selectionAnchor && selectedPaths.has(selectionAnchor)) {
         return [selectionAnchor];
       }
-      return [[...selectedPaths][0]];
+      const first = selectedPaths.values().next().value;
+      return first ? [first] : [];
     }
     if (activeGroup?.photos.length) {
-      return activeGroup.photos.slice(0, 1).map((p) => p.path);
+      return [activeGroup.photos[0].path];
     }
-    return [];
-  })();
+    return [] as string[];
+  }, [
+    isFormalCompare,
+    comparePaths,
+    selectedPaths,
+    selectionAnchor,
+    activeGroup,
+  ]);
+
+  const pathsKey = paths.join("\0");
+  const wantRawKey = useMemo(
+    () => [...wantRawPaths].sort().join("\0"),
+    [wantRawPaths],
+  );
+
+  const orientationByPath = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const p of photos) m.set(p.path, p.orientation);
+    return m;
+  }, [photos]);
+
+  const applyMinFit = useCallback(() => {
+    const values = [...fitByPathRef.current.values()].filter((v) => v > 0);
+    if (!values.length) {
+      setFitNativeZoom(null);
+      return;
+    }
+    const minFit = Math.min(...values);
+    setFitNativeZoom(minFit);
+    setSyncViewport((v) => (v.scale > 0 ? v : { scale: minFit, x: 0, y: 0 }));
+  }, [setFitNativeZoom, setSyncViewport]);
+
+  const onReportFit = useCallback(
+    (path: string, fit: number | null) => {
+      if (fit == null || !(fit > 0)) {
+        fitByPathRef.current.delete(path);
+      } else {
+        fitByPathRef.current.set(path, fit);
+      }
+      applyMinFit();
+    },
+    [applyMinFit],
+  );
+
+  const onReportWantRaw = useCallback((path: string, want: boolean) => {
+    setWantRawPaths((prev) => {
+      const has = prev.has(path);
+      if (want && has) return prev;
+      if (!want && !has) return prev;
+      const next = new Set(prev);
+      if (want) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    fitByPathRef.current.clear();
+    setFitNativeZoom(null);
+    setSyncViewport({ scale: 0, x: 0, y: 0 });
+  }, [pathsKey, setFitNativeZoom, setSyncViewport]);
+
+  // rawUnlocked / wantRawPaths 只保留仍在当前 paths 里的项
+  useEffect(() => {
+    const alive = new Set(paths);
+    setRawUnlocked((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const p of prev) {
+        if (alive.has(p)) next.add(p);
+        else changed = true;
+      }
+      return changed || next.size !== prev.size ? next : prev;
+    });
+    setWantRawPaths((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const p of prev) {
+        if (alive.has(p)) next.add(p);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [paths]);
+
+  // 单点 resize：按已上报的 natural 无法重算格子尺寸，触发子 pane 靠 window 不够；
+  // 子级仍各自 measure；此处仅保证窗口变化时再聚合一次（子级 window resize 已测）
+  useEffect(() => {
+    const onResize = () => applyMinFit();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [applyMinFit]);
+
+  const nativeZoom =
+    syncViewport.scale > 0 ? syncViewport.scale : (fitNativeZoom ?? 0);
+
+  useEffect(() => {
+    if (nativeZoom < RAW_NATIVE_ZOOM) return;
+    setRawUnlocked((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const p of paths) {
+        if (!next.has(p)) {
+          next.add(p);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [nativeZoom, paths]);
+
+  useEffect(() => {
+    // 仅「仍想看 RAW」的格子进优先级（切 JPG 的不占队）
+    // 注意：依赖变化时直接用新列表覆盖，勿在 cleanup 里先 []——
+    // 否则中间会把仍需要的第二张从队列踢掉，且 useCr3Preview 不会自动重试。
+    const needRaw = paths.filter((p) => wantRawPaths.has(p));
+    setRawPreviewPriority(needRaw);
+  }, [paths, wantRawKey, wantRawPaths]);
+
+  // 整页卸载时才清空 RAW 优先级
+  useEffect(() => {
+    return () => setRawPreviewPriority([]);
+  }, []);
 
   const viewRef = useRef<HTMLDivElement | null>(null);
 
-  // React 合成 wheel 默认 passive，需原生监听才能 preventDefault
   useEffect(() => {
     const el = viewRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      setSyncViewport((v) => ({
-        ...v,
-        scale: Math.min(8, Math.max(0.2, v.scale * delta)),
-      }));
+      setSyncViewport((v) => {
+        const base =
+          v.scale > 0
+            ? v.scale
+            : fitNativeZoom && fitNativeZoom > 0
+              ? fitNativeZoom
+              : 0;
+        // fit 未就绪时不抢跑写成 0.9/1.1，否则 applyMinFit 无法再写入适应倍率
+        if (!(base > 0)) return v;
+        return {
+          ...v,
+          scale: Math.min(MAX_SCALE, Math.max(MIN_SCALE, base * delta)),
+        };
+      });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [setSyncViewport, paths.length]);
+  }, [setSyncViewport, fitNativeZoom, pathsKey]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
-      // 点在 pane 上由 pane 自己处理勾选；空白处才拖拽平移
       if ((e.target as HTMLElement).closest(".compare-pane")) return;
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       dragRef.current = {
@@ -201,7 +463,7 @@ export default function SyncCompareView() {
   }
 
   const cols =
-    paths.length <= 1 ? 1 : paths.length <= 4 ? 2 : paths.length <= 6 ? 3 : 3;
+    paths.length <= 1 ? 1 : paths.length <= 4 ? 2 : paths.length <= 9 ? 3 : 4;
 
   return (
     <div
@@ -219,8 +481,12 @@ export default function SyncCompareView() {
         <ComparePane
           key={path}
           path={path}
+          orientation={orientationByPath.get(path) ?? null}
           onToggleKeep={toggleKeep}
           allowKeep={isFormalCompare}
+          useRaw={rawUnlocked.has(path) && nativeZoom >= RAW_NATIVE_ZOOM}
+          onReportFit={onReportFit}
+          onReportWantRaw={onReportWantRaw}
         />
       ))}
     </div>

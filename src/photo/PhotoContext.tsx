@@ -17,7 +17,7 @@ import { PHOTO_DIR_KEY, store } from "../utils/store";
 import { groupBursts, type BurstGroup, type PhotoMeta } from "./groupBursts";
 import { invalidateCr3Preview, pruneCr3PreviewCache } from "./useCr3Preview";
 
-export const MAX_COMPARE = 9;
+export const MAX_COMPARE = 16;
 
 const tipCompareLimit = (extra?: string) => {
   notificationOpen({
@@ -41,6 +41,8 @@ interface PhotoContextValue {
   photos: PhotoMeta[];
   groups: BurstGroup[];
   loading: boolean;
+  /** 列表已出、元数据仍在渐进解析 */
+  enriching: boolean;
   activeGroupId: string | null;
   setActiveGroupId: (id: string | null) => void;
   activeGroup: BurstGroup | null;
@@ -72,17 +74,29 @@ interface PhotoContextValue {
   syncViewport: SyncViewport;
   setSyncViewport: React.Dispatch<React.SetStateAction<SyncViewport>>;
   resetSyncViewport: () => void;
+  /**
+   * 适应窗口对应的物理像素倍率（1 = 100%）。
+   * syncViewport.scale 同语义：1 = 1 图像像素 / 1 物理像素；≤0 表示待测完后自动适应。
+   */
+  fitNativeZoom: number | null;
+  setFitNativeZoom: (z: number | null) => void;
+  zoomTo100Percent: () => void;
+  canZoom100: boolean;
+  /** 当前相对物理像素的放大百分比文案 */
+  zoomPercentLabel: string;
   refresh: () => void;
 }
 
 const PhotoContext = createContext<PhotoContextValue | null>(null);
 
-const DEFAULT_VIEWPORT: SyncViewport = { scale: 1, x: 0, y: 0 };
+/** scale≤0：等待测到 fitNativeZoom 后写入适应倍率 */
+const DEFAULT_VIEWPORT: SyncViewport = { scale: 0, x: 0, y: 0 };
 
 export function PhotoProvider({ children }: { children: React.ReactNode }) {
   const [photoDir, setPhotoDirState] = useState("");
   const [photos, setPhotos] = useState<PhotoMeta[]>([]);
   const [loading, setLoading] = useState(false);
+  const [enriching, setEnriching] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(
     () => new Set(),
@@ -91,6 +105,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
   const [keepPaths, setKeepPaths] = useState<Set<string>>(() => new Set());
   const [syncViewport, setSyncViewport] =
     useState<SyncViewport>(DEFAULT_VIEWPORT);
+  const [fitNativeZoom, setFitNativeZoom] = useState<number | null>(null);
 
   const { mode } = useAppMode();
   const photoDirRef = useRef(photoDir);
@@ -114,18 +129,41 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
     scanTimer.current = window.setTimeout(async () => {
       const gen = ++scanGen.current;
       if (!dir) {
-        if (gen === scanGen.current) setPhotos([]);
+        if (gen === scanGen.current) {
+          setPhotos([]);
+          setEnriching(false);
+        }
+        void invoke("cancel_cr3_enrich", { gen }).catch(() => {});
         return;
       }
       setLoading(true);
+      setEnriching(false);
       try {
-        const list = await invoke<PhotoMeta[]>("scan_cr3_directory", { dir });
+        const list = await invoke<PhotoMeta[]>("list_cr3_directory", { dir });
         if (gen !== scanGen.current) return;
         setPhotos(list);
+        setLoading(false);
+        setEnriching(list.length > 0);
+        // 即使 0 文件也调 enrich：推进 ENRICH_GEN，作废旧目录后台扫描
+        void invoke("enrich_cr3_directory", { dir, gen }).catch((e) => {
+          if (gen !== scanGen.current) return;
+          console.error("渐进解析 CR3 失败:", e);
+          setEnriching(false);
+          if (list.length) {
+            notificationOpen({
+              type: "warning",
+              message: "照片元数据解析未完成",
+              description: e instanceof Error ? e.message : String(e),
+              duration: 4,
+              key: "photo-enrich-failed",
+            });
+          }
+        });
       } catch (e) {
         if (gen !== scanGen.current) return;
-        console.error("扫描 CR3 目录失败:", e);
+        console.error("列出 CR3 目录失败:", e);
         setPhotos([]);
+        setEnriching(false);
         notificationOpen({
           type: "error",
           message: "扫描照片目录失败",
@@ -133,32 +171,76 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
           duration: 5,
           key: "photo-scan-failed",
         });
-      } finally {
-        if (gen === scanGen.current) setLoading(false);
+        setLoading(false);
       }
     }, 200);
   }, []);
+
+  useEffect(() => {
+    if (mode !== "photo") return;
+    const unMeta = listen<{ gen: number; photos: PhotoMeta[] }>(
+      "photo-scan-meta",
+      (event) => {
+        if (event.payload.gen !== scanGen.current) return;
+        const updates = new Map(
+          event.payload.photos.map((p) => [p.path, p] as const),
+        );
+        setPhotos((prev) =>
+          prev.map((p) => {
+            const u = updates.get(p.path);
+            return u ? { ...p, ...u } : p;
+          }),
+        );
+      },
+    );
+    const unDone = listen<{ gen: number }>("photo-scan-done", (event) => {
+      if (event.payload.gen !== scanGen.current) return;
+      setEnriching(false);
+    });
+    return () => {
+      unMeta.then((fn) => fn());
+      unDone.then((fn) => fn());
+    };
+  }, [mode]);
 
   const setPhotoDir = useCallback(async (newDir: string) => {
     if (newDir && !(await ensureAllowedManagedDir(newDir, "Raw"))) {
       return false;
     }
+    // 立即作废旧 enrich / meta，避免 debounce 窗口内写入旧目录
+    const gen = ++scanGen.current;
+    void invoke("cancel_cr3_enrich", { gen }).catch(() => {});
     setPhotoDirState(newDir);
     await store.set(PHOTO_DIR_KEY, newDir);
+    setPhotos([]);
     setActiveGroupId(null);
     setSelectedPaths(new Set());
     setSelectionAnchor(null);
     setComparePathsState([]);
     setKeepPaths(new Set());
     setSyncViewport(DEFAULT_VIEWPORT);
+    setFitNativeZoom(null);
+    setEnriching(false);
     return true;
   }, []);
 
   // 仅照片模式监听/扫描，避免视频模式后台占用
   useEffect(() => {
     if (mode !== "photo" || !photoDir) {
-      if (mode !== "photo") return;
+      if (mode !== "photo") {
+        if (scanTimer.current) {
+          clearTimeout(scanTimer.current);
+          scanTimer.current = null;
+        }
+        const gen = ++scanGen.current;
+        setPhotos([]);
+        setLoading(false);
+        setEnriching(false);
+        void invoke("cancel_cr3_enrich", { gen }).catch(() => {});
+        return;
+      }
       setPhotos([]);
+      setEnriching(false);
       return;
     }
     scanDirectory(photoDir);
@@ -219,11 +301,22 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
     });
   }, [scanDirectory]);
 
+  // 仅 path 集合变化时 prune，避免 meta 渐进更新反复跑
+  const photosPathsKey = useMemo(
+    () => photos.map((p) => p.path).join("\0"),
+    [photos],
+  );
   useEffect(() => {
-    pruneCr3PreviewCache(new Set(photos.map((p) => p.path)));
-  }, [photos]);
+    const alive = photosPathsKey
+      ? new Set(photosPathsKey.split("\0"))
+      : new Set<string>();
+    pruneCr3PreviewCache(alive);
+  }, [photosPathsKey]);
 
-  const groups = useMemo(() => groupBursts(photos), [photos]);
+  const groups = useMemo(
+    () => groupBursts(photos, { deferBurstMerge: enriching }),
+    [photos, enriching],
+  );
 
   useEffect(() => {
     if (!groups.length) {
@@ -481,8 +574,21 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const resetSyncViewport = useCallback(() => {
-    setSyncViewport(DEFAULT_VIEWPORT);
+    if (fitNativeZoom && fitNativeZoom > 0) {
+      setSyncViewport({ scale: fitNativeZoom, x: 0, y: 0 });
+    } else {
+      setSyncViewport(DEFAULT_VIEWPORT);
+    }
+  }, [fitNativeZoom]);
+
+  const zoomTo100Percent = useCallback(() => {
+    setSyncViewport({ scale: 1, x: 0, y: 0 });
   }, []);
+
+  const effectiveNativeZoom =
+    syncViewport.scale > 0 ? syncViewport.scale : (fitNativeZoom ?? 0);
+  const zoomPercentLabel =
+    effectiveNativeZoom > 0 ? `${Math.round(effectiveNativeZoom * 100)}%` : "—";
 
   const refresh = useCallback(() => {
     if (photoDirRef.current) scanDirectory(photoDirRef.current);
@@ -496,6 +602,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
         photos,
         groups,
         loading,
+        enriching,
         activeGroupId,
         setActiveGroupId,
         activeGroup,
@@ -520,6 +627,11 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
         syncViewport,
         setSyncViewport,
         resetSyncViewport,
+        fitNativeZoom,
+        setFitNativeZoom,
+        zoomTo100Percent,
+        canZoom100: true,
+        zoomPercentLabel,
         refresh,
       }}
     >

@@ -48,7 +48,11 @@ pub fn run() {
             sync::start_folder_sync,
             sync::cancel_folder_sync,
             cr3::scan_cr3_directory,
+            cr3::list_cr3_directory,
+            cr3::enrich_cr3_directory,
+            cr3::cancel_cr3_enrich,
             cr3::get_cr3_preview,
+            cr3::get_cr3_raw_preview,
             cr3::cleanup_photo_preview_cache,
         ])
         .run(tauri::generate_context!())

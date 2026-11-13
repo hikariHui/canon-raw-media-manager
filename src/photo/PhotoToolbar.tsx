@@ -6,6 +6,7 @@ import {
   MdSelectAll,
   MdDeselect,
   MdZoomOutMap,
+  MdZoomIn,
   MdCompare,
 } from "react-icons/md";
 import { isAppDialogOpen } from "../utils/isAppDialogOpen";
@@ -38,6 +39,9 @@ export default function PhotoToolbar() {
     clearKeep,
     toggleKeep,
     resetSyncViewport,
+    zoomTo100Percent,
+    canZoom100,
+    zoomPercentLabel,
     refresh,
     navigatePhoto,
     navigateGroup,
@@ -250,6 +254,12 @@ export default function PhotoToolbar() {
           · 对比中 {comparePaths.length}/{MAX_COMPARE}
           {comparePaths.length >= MAX_COMPARE ? "（已满）" : ""}
         </span>
+        <span
+          className="photo-toolbar-zoom"
+          title="相对屏幕物理像素的放大倍率（100% = 1:1）"
+        >
+          · 缩放 <strong>{zoomPercentLabel}</strong>
+        </span>
       </div>
       <div className="photo-toolbar-actions">
         <Button size="small" onClick={selectAllInGroup} disabled={!activeGroup}>
@@ -283,9 +293,18 @@ export default function PhotoToolbar() {
         >
           清除对比
         </Button>
-        <Button size="small" onClick={resetSyncViewport}>
+        <Button size="small" onClick={resetSyncViewport} title="恢复为适应窗口">
           <MdZoomOutMap style={{ marginRight: 4 }} />
           重置缩放
+        </Button>
+        <Button
+          size="small"
+          onClick={zoomTo100Percent}
+          disabled={!canZoom100}
+          title="实际像素 1:1（1 图像像素 = 1 屏幕物理像素）"
+        >
+          <MdZoomIn style={{ marginRight: 4 }} />
+          100%
         </Button>
         <Button
           size="small"

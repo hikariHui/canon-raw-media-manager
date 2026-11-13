@@ -4,6 +4,8 @@ export interface PhotoMeta {
   datetime_ms: number | null;
   continuous_drive: number | null;
   burst_key: string | null;
+  /** EXIF Orientation 1–8；未解析时为 null */
+  orientation: number | null;
 }
 
 export interface BurstGroup {
@@ -17,12 +19,27 @@ const isContinuousDrive = (v: number | null | undefined) =>
 
 const GAP_MS = 1000;
 
+export type GroupBurstsOptions = {
+  /**
+   * 渐进扫描中：先按文件顺序拆成单张，避免 datetime 陆续到位时连拍组反复拆合跳动。
+   * enrich 结束后再走完整连拍合并。
+   */
+  deferBurstMerge?: boolean;
+};
+
 /**
  * 连拍分组：优先 burst_key；否则按时间间隙 ≤1s，
  * 且（连拍标志或间隙极小）合并。
  */
-export function groupBursts(photos: PhotoMeta[]): BurstGroup[] {
+export function groupBursts(
+  photos: PhotoMeta[],
+  opts?: GroupBurstsOptions,
+): BurstGroup[] {
   if (!photos.length) return [];
+
+  if (opts?.deferBurstMerge) {
+    return photos.map((p) => ({ id: `path:${p.path}`, photos: [p] }));
+  }
 
   const byKey = new Map<string, PhotoMeta[]>();
   const unkeyed: PhotoMeta[] = [];

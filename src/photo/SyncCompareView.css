@@ -50,7 +50,15 @@
   white-space: nowrap;
 }
 
-.compare-pane-keep-badge {
+.compare-pane-badges {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+  align-items: center;
+}
+
+.compare-pane-keep-badge,
+.compare-pane-raw-badge {
   display: inline-flex;
   flex-shrink: 0;
   gap: 2px;
@@ -60,6 +68,35 @@
   color: #2a241c;
   background: #7dc395;
   border-radius: 999px;
+}
+
+.compare-pane-raw-badge {
+  color: #f0e8d8;
+  background: #5a6fa8;
+  border: none;
+}
+
+button.compare-pane-raw-badge.is-toggle {
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+button.compare-pane-raw-badge.is-toggle:hover {
+  filter: brightness(1.08);
+}
+
+button.compare-pane-raw-badge.is-toggle.is-jpg {
+  background: #9f927d;
+}
+
+.compare-pane-raw-badge.is-loading {
+  opacity: 0.75;
+}
+
+.compare-pane-raw-badge.is-error {
+  color: #f0e8d8;
+  background: #c45c4a;
 }
 
 .compare-pane-viewport {
@@ -79,11 +116,10 @@
 }
 
 .compare-pane-stage img {
-  max-width: 100%;
-  max-height: 100%;
+  flex-shrink: 0;
   pointer-events: none;
-  object-fit: contain;
-  image-rendering: high-quality;
+  image-orientation: none;
+  image-rendering: auto;
   -webkit-user-drag: none;
 }
 
