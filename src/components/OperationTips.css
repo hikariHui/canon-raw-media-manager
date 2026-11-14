@@ -1,11 +1,13 @@
 .tips-content {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
+  min-width: 0;
 }
 
 .tips-label {
-  font-size: 14px;
+  flex-shrink: 0;
+  font-size: 13px;
   font-weight: 700;
   color: #794f27;
   white-space: nowrap;
@@ -14,13 +16,9 @@
 .tips-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
-}
-
-.tip-icon {
-  font-size: 14px;
-  color: #19c8b9;
+  min-width: 0;
 }
 
 kbd {
@@ -34,20 +32,36 @@ kbd {
 }
 
 .tip-tag {
-  display: flex;
-  gap: 6px;
+  display: inline-flex;
+  gap: 5px;
   align-items: center;
-  padding: 4px 10px;
-  font-size: 13px;
+  padding: 3px 8px;
+  font-size: 12px;
   font-weight: 600;
   color: #794f27;
+  white-space: nowrap;
   background: #e6f9f6;
-  border-radius: 12px;
+  border-radius: 10px;
   transition:
     opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1),
     filter 0.15s cubic-bezier(0.4, 0, 0.2, 1),
     color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
     background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tips-content-dense .tips-tags {
+  gap: 4px;
+}
+
+.tips-content-dense .tip-tag {
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.tips-content-dense kbd {
+  padding: 1px 5px;
+  font-size: 10px;
 }
 
 .tip-tag-disabled {
@@ -57,10 +71,6 @@ kbd {
   background: #efeae2;
   opacity: 0.55;
   filter: grayscale(0.35);
-}
-
-.tip-tag-disabled .tip-icon {
-  color: #b0a090;
 }
 
 .tip-tag-disabled kbd {

@@ -15,6 +15,7 @@ import { ensureAllowedManagedDir } from "../utils/allowedDirs";
 import { onUndoComplete } from "../utils/oprationHistory";
 import { PHOTO_DIR_KEY, store } from "../utils/store";
 import { groupBursts, type BurstGroup, type PhotoMeta } from "./groupBursts";
+import { pruneThumbHeavyPaths } from "./LazyThumb";
 import { invalidateCr3Preview, pruneCr3PreviewCache } from "./useCr3Preview";
 
 export const MAX_COMPARE = 16;
@@ -311,6 +312,7 @@ export function PhotoProvider({ children }: { children: React.ReactNode }) {
       ? new Set(photosPathsKey.split("\0"))
       : new Set<string>();
     pruneCr3PreviewCache(alive);
+    pruneThumbHeavyPaths(alive);
   }, [photosPathsKey]);
 
   const groups = useMemo(

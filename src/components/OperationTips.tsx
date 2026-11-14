@@ -1,16 +1,5 @@
 import { useState, useEffect } from "react";
-import {
-  MdPlayArrow,
-  MdArrowBack,
-  MdArrowForward,
-  MdArrowUpward,
-  MdArrowDownward,
-  MdDelete,
-  MdStar,
-  MdWarning,
-  MdZoomIn,
-  MdCompare,
-} from "react-icons/md";
+import { MdWarning } from "react-icons/md";
 import { useAppMode } from "../context/ModeContext";
 import { useAppContext } from "../context/AppContext";
 import { usePhotoContext } from "../photo/PhotoContext";
@@ -124,8 +113,10 @@ export default function OperationTips() {
   const videoEnterOk =
     !gate.dialog && !gate.typing && !gate.nonThumbButton && !!curCrmFile;
   const videoSeekOk = !gate.dialog && !gate.typing && !!curProxyFileUrl;
-  const photoDblOk = photos.length > 0;
-  const photoKeepClickOk = comparePaths.length > 0;
+  const photoInteractOk = !photoBlocked && photos.length > 0;
+  const photoDblOk = photoInteractOk;
+  const photoZoomOk = photoInteractOk;
+  const photoKeepClickOk = !photoBlocked && comparePaths.length > 0;
 
   if (!isFocused) {
     return (
@@ -138,47 +129,50 @@ export default function OperationTips() {
 
   if (mode === "photo") {
     return (
-      <div className="tips-content">
-        <span className="tips-label">快捷键：</span>
+      <div className="tips-content tips-content-dense">
+        <span className="tips-label">快捷键</span>
         <div className="tips-tags">
           <TipTag active={photoNavOk} title={navOffReason}>
-            <MdArrowBack className="tip-icon" />
             <kbd>←</kbd>
-            <MdArrowForward className="tip-icon" />
-            <kbd>→</kbd> 上一张/下一张
+            <kbd>→</kbd> 切张
           </TipTag>
           <TipTag active={photoNavOk} title={navOffReason}>
-            <MdArrowUpward className="tip-icon" />
             <kbd>↑</kbd>
-            <MdArrowDownward className="tip-icon" />
-            <kbd>↓</kbd> 上一组/下一组
+            <kbd>↓</kbd> 切组
           </TipTag>
           <TipTag
             active={photoDeleteOk}
             title={photoBlocked ? blockedReason : "先多选左侧缩略图"}
           >
-            <kbd>Shift</kbd>/<kbd>⌘</kbd>点左侧缩略图多选，再
-            <kbd>Backspace</kbd> 删除
+            <kbd>⇧</kbd>/<kbd>⌘</kbd>多选 · <kbd>⌫</kbd> 删除
           </TipTag>
-          <TipTag active={photoDblOk} title="暂无照片">
-            <MdCompare className="tip-icon" />
-            <kbd>双击</kbd> 加入对比
+          <TipTag
+            active={photoDblOk}
+            title={photoBlocked ? blockedReason : "暂无照片"}
+          >
+            <kbd>双击</kbd> 对比
           </TipTag>
           <TipTag
             active={photoKeepClickOk}
-            title="需先进入正式对比（双击加入对比区）"
+            title={
+              photoBlocked
+                ? blockedReason
+                : "需先进入正式对比（双击加入对比区）"
+            }
           >
-            对比区点击勾选保留
+            对比区点选保留
           </TipTag>
-          <TipTag active={photoDblOk} title="暂无照片">
-            <MdZoomIn className="tip-icon" />
-            滚轮缩放 · 空白处拖拽平移
+          <TipTag
+            active={photoZoomOk}
+            title={photoBlocked ? blockedReason : "暂无照片"}
+          >
+            滚轮缩放 · 拖移
           </TipTag>
           <TipTag
             active={photoEscOk}
             title={photoBlocked ? blockedReason : "当前无勾选/对比"}
           >
-            <kbd>Esc</kbd> 退出勾选/对比
+            <kbd>Esc</kbd> 清除
           </TipTag>
           <TipTag
             active={photoEnterOk}
@@ -192,8 +186,7 @@ export default function OperationTips() {
                     : "需对比区勾选保留，或左侧单选"
             }
           >
-            <MdStar className="tip-icon" />
-            <kbd>Enter</kbd> 移到 starred
+            <kbd>Enter</kbd> starred
           </TipTag>
         </div>
       </div>
@@ -202,7 +195,7 @@ export default function OperationTips() {
 
   return (
     <div className="tips-content">
-      <span className="tips-label">快捷键：</span>
+      <span className="tips-label">快捷键</span>
       <div className="tips-tags">
         <TipTag
           active={videoSeekOk}
@@ -214,7 +207,6 @@ export default function OperationTips() {
                 : "无可用预览"
           }
         >
-          <MdPlayArrow className="tip-icon" />
           <kbd>空格</kbd> 播放/暂停
         </TipTag>
         <TipTag
@@ -227,8 +219,7 @@ export default function OperationTips() {
                 : "无可用预览"
           }
         >
-          <MdArrowBack className="tip-icon" />
-          <kbd>←</kbd> 后退5秒
+          <kbd>←</kbd> 后退 5s
         </TipTag>
         <TipTag
           active={videoSeekOk}
@@ -240,8 +231,7 @@ export default function OperationTips() {
                 : "无可用预览"
           }
         >
-          <MdArrowForward className="tip-icon" />
-          <kbd>→</kbd> 快进5秒
+          <kbd>→</kbd> 快进 5s
         </TipTag>
         <TipTag
           active={videoDeleteOk}
@@ -253,8 +243,7 @@ export default function OperationTips() {
                 : "未选中文件"
           }
         >
-          <MdDelete className="tip-icon" />
-          <kbd>Backspace</kbd> 删除
+          <kbd>⌫</kbd> 删除
         </TipTag>
         <TipTag
           active={videoEnterOk}
@@ -268,7 +257,6 @@ export default function OperationTips() {
                   : "未选中文件"
           }
         >
-          <MdStar className="tip-icon" />
           <kbd>Enter</kbd> 星标
         </TipTag>
       </div>

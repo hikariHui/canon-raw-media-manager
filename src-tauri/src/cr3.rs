@@ -16,8 +16,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 const CACHE_DIR_NAME: &str = "photo-preview-cache";
 const INDEX_FILE: &str = "index.json";
-const MAX_CACHE_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-const TARGET_AFTER_EVICT: u64 = 1800 * 1024 * 1024; // 1.8GB
+const MAX_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4GB
+const TARGET_AFTER_EVICT: u64 = 3600 * 1024 * 1024; // 3.6GB
 const TTL_SECS: u64 = 7 * 24 * 60 * 60; // 7 days
 
 /// Canon metadata uuid (contains CMT1/CMT2/CMT3/THMB)
@@ -177,10 +177,18 @@ fn simple_hash(s: &str) -> String {
     format!("{hash:016x}")
 }
 
-fn kind_str(kind: PreviewKind) -> &'static str {
+fn kind_str(kind: PreviewKind, quality: Option<&str>) -> &'static str {
     match kind {
-        PreviewKind::Thumb => "thumb",
-        // v2：优先 mdat 全尺寸 JPEG，旧 preview 缓存自动失效
+        // fast/heavy 分缓存与锁，避免点选兜底被慢速 THMB 抽取堵住
+        PreviewKind::Thumb => {
+            if thumb_quality_heavy(quality) {
+                // v2：PRVW/HQ 回退 + 更宽松的 THMB 声明长度校验
+                "thumb_heavy_v2"
+            } else {
+                "thumb_fast_v2"
+            }
+        }
+        // v3：优先 moov trak 全尺寸 JPEG，旧 preview 缓存自动失效
         PreviewKind::Preview => "preview_hq_v3",
     }
 }
@@ -587,8 +595,8 @@ fn looks_like_complete_jpeg(buf: &[u8]) -> bool {
     if buf.len() < 4 || buf[0] != 0xff || buf[1] != 0xd8 {
         return false;
     }
-    // 允许 sample size 尾部少量 padding，在末尾窗口内找 EOI
-    let tail = buf.len().saturating_sub(64);
+    // HQ sample 常带尾部 padding；THMB 声明长度也可能偏大，窗口放宽到 4KB
+    let tail = buf.len().saturating_sub(4096);
     buf[tail..].windows(2).any(|w| w[0] == 0xff && w[1] == 0xd9)
 }
 
@@ -608,7 +616,7 @@ fn cached_jpeg_file_ok(path: &Path) -> bool {
     if f.read_exact(&mut head).is_err() || head != [0xff, 0xd8] {
         return false;
     }
-    let window = len.min(64);
+    let window = len.min(4096);
     let start = (len - window) as u64;
     if f.seek(SeekFrom::Start(start)).is_err() {
         return false;
@@ -645,7 +653,7 @@ fn extract_hq_jpeg_from_mdat(file: &mut File, file_len: u64) -> Option<Vec<u8>> 
     Some(jpeg.to_vec())
 }
 
-/// 按声明长度切片；必须通过完整 JPEG 校验，否则回退扫描。
+/// 按声明长度切片；完整校验失败时再在声明区间内扫 EOI（兼容尾部 padding）。
 fn take_declared_jpeg(body: &[u8], jpeg_off: usize, jpeg_size: usize) -> Option<Vec<u8>> {
     if jpeg_off + jpeg_size > body.len() {
         return None;
@@ -657,7 +665,7 @@ fn take_declared_jpeg(body: &[u8], jpeg_off: usize, jpeg_size: usize) -> Option<
     if looks_like_complete_jpeg(slice) {
         return Some(slice.to_vec());
     }
-    None
+    find_jpeg_in_slice(slice).map(|j| j.to_vec())
 }
 
 fn extract_thmb_jpeg(data: &[u8]) -> Option<Vec<u8>> {
@@ -728,15 +736,19 @@ fn extract_named_preview(
                 hdr.start,
                 (hdr.payload_start - hdr.start) + hdr.payload_len,
             )?;
-            found = match kind {
+            let jpeg = match kind {
                 PreviewKind::Thumb => extract_thmb_jpeg(&data),
                 PreviewKind::Preview => extract_prvw_jpeg(&data),
             };
+            // 解析失败不中断 walk，继续找其它 THMB/PRVW/uuid
+            if jpeg.is_some() {
+                found = jpeg;
+            }
             return Ok(());
         }
         if hdr.typ == *b"uuid" && hdr.uuid == Some(target_uuid) {
             let data = read_file_region(f, hdr.payload_start, hdr.payload_len)?;
-            found = match kind {
+            let jpeg = match kind {
                 PreviewKind::Thumb => {
                     if let Some(pos) = data.windows(4).position(|w| w == b"THMB") {
                         let start = if pos >= 4 { pos - 4 } else { pos };
@@ -747,6 +759,9 @@ fn extract_named_preview(
                 }
                 PreviewKind::Preview => extract_prvw_jpeg(&data),
             };
+            if jpeg.is_some() {
+                found = jpeg;
+            }
         }
         Ok(())
     })?;
@@ -758,12 +773,36 @@ fn thumb_quality_heavy(quality: Option<&str>) -> bool {
     matches!(quality, Some("heavy"))
 }
 
+/// 把大图缩到缩略图量级，避免 heavy 回退 HQ 时写巨大缓存
+fn jpeg_downscale_thumb(jpeg: &[u8], max_edge: u32) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(jpeg).ok()?;
+    let (w, h) = (img.width(), img.height());
+    let edge = w.max(h);
+    let resized = if edge > max_edge {
+        img.thumbnail(max_edge, max_edge)
+    } else {
+        img
+    };
+    let rgb = resized.to_rgb8();
+    let mut out = Vec::new();
+    let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85);
+    enc.write_image(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        image::ExtendedColorType::Rgb8,
+    )
+    .ok()?;
+    Some(out)
+}
+
 fn extract_thumb_heavy(file: &mut File, file_len: u64) -> Result<Option<Vec<u8>>, String> {
     if let Some(thmb) = extract_named_preview(file, file_len, PreviewKind::Thumb)? {
         return Ok(Some(thmb));
     }
     if let Some(prvw) = extract_named_preview(file, file_len, PreviewKind::Preview)? {
-        return Ok(Some(prvw));
+        // PRVW 约 1600px，缩到列表尺寸
+        return Ok(Some(jpeg_downscale_thumb(&prvw, 320).unwrap_or(prvw)));
     }
     let mut found: Option<Vec<u8>> = None;
     walk_boxes(file, 0, file_len, 0, &mut |f, hdr| {
@@ -778,7 +817,16 @@ fn extract_thumb_heavy(file: &mut File, file_len: u64) -> Result<Option<Vec<u8>>
         }
         Ok(())
     })?;
-    Ok(found)
+    if found.is_some() {
+        return Ok(found);
+    }
+    // 最后回退全尺寸嵌入 JPEG（再缩小），覆盖无 THMB/PRVW 的文件
+    if let Some(hq) = extract_hq_jpeg_from_moov_trak(file, file_len)
+        .or_else(|| extract_hq_jpeg_from_mdat(file, file_len))
+    {
+        return Ok(Some(jpeg_downscale_thumb(&hq, 320).unwrap_or(hq)));
+    }
+    Ok(None)
 }
 
 /// Extract embedded JPEG of given kind from CR3.
@@ -1335,8 +1383,15 @@ fn photo_meta_stub(path: &Path, err: Option<&str>) -> PhotoMeta {
     }
 }
 
-fn touch_and_evict(root: &Path, key: &str, kind: PreviewKind, file_name: &str, size: u64) {
-    touch_and_evict_kind(root, key, kind_str(kind), file_name, size);
+fn touch_and_evict(
+    root: &Path,
+    key: &str,
+    kind: PreviewKind,
+    quality: Option<&str>,
+    file_name: &str,
+    size: u64,
+) {
+    touch_and_evict_kind(root, key, kind_str(kind, quality), file_name, size);
 }
 
 fn touch_and_evict_kind(root: &Path, key: &str, kind: &str, file_name: &str, size: u64) {
@@ -1431,8 +1486,8 @@ fn touch_and_evict_kind(root: &Path, key: &str, kind: &str, file_name: &str, siz
     }
 }
 
-fn cached_path(root: &Path, key: &str, kind: PreviewKind) -> PathBuf {
-    root.join(format!("{}_{}.jpg", key, kind_str(kind)))
+fn cached_path(root: &Path, key: &str, kind: PreviewKind, quality: Option<&str>) -> PathBuf {
+    root.join(format!("{}_{}.jpg", key, kind_str(kind, quality)))
 }
 
 fn cached_path_kind(root: &Path, key: &str, kind: &str) -> PathBuf {
@@ -1453,7 +1508,8 @@ pub async fn get_cr3_preview(
     let root = cache_root(&app)?;
     ensure_index_loaded(&root);
     let key = content_key(&path_buf)?;
-    let out = cached_path(&root, &key, kind);
+    let quality_ref = quality.as_deref();
+    let out = cached_path(&root, &key, kind, quality_ref);
 
     if out.exists() {
         if cached_jpeg_file_ok(&out) {
@@ -1462,6 +1518,7 @@ pub async fn get_cr3_preview(
                 &root,
                 &key,
                 kind,
+                quality_ref,
                 out.file_name().unwrap().to_string_lossy().as_ref(),
                 size,
             );
@@ -1470,18 +1527,19 @@ pub async fn get_cr3_preview(
         let _ = fs::remove_file(&out);
     }
 
-    let lock_key = format!("{}:{}", key, kind_str(kind));
+    let lock_key = format!("{}:{}", key, kind_str(kind, quality_ref));
     let out_display = tauri::async_runtime::spawn_blocking({
         let path_buf = path_buf.clone();
         let root = root.clone();
         let key = key.clone();
         let out = out.clone();
         let lock_key = lock_key.clone();
-        let quality_ref = quality.clone();
+        let quality_owned = quality.clone();
         move || -> Result<String, String> {
             let lock = preview_extract_lock(&lock_key);
             let result = (|| {
                 let _guard = lock.lock().unwrap();
+                let q = quality_owned.as_deref();
                 // 双检：等待期间可能已被其他任务写好
                 if out.exists() && cached_jpeg_file_ok(&out) {
                     let size = out.metadata().map(|m| m.len()).unwrap_or(0);
@@ -1489,6 +1547,7 @@ pub async fn get_cr3_preview(
                         &root,
                         &key,
                         kind,
+                        q,
                         out.file_name().unwrap().to_string_lossy().as_ref(),
                         size,
                     );
@@ -1497,7 +1556,7 @@ pub async fn get_cr3_preview(
                 if out.exists() {
                     let _ = fs::remove_file(&out);
                 }
-                let jpeg = extract_preview_jpeg(&path_buf, kind, quality_ref.as_deref())?;
+                let jpeg = extract_preview_jpeg(&path_buf, kind, q)?;
                 {
                     let mut f = File::create(&out).map_err(|e| format!("写缓存失败: {e}"))?;
                     f.write_all(&jpeg).map_err(|e| format!("写缓存失败: {e}"))?;
@@ -1507,6 +1566,7 @@ pub async fn get_cr3_preview(
                     &root,
                     &key,
                     kind,
+                    q,
                     out.file_name().unwrap().to_string_lossy().as_ref(),
                     size,
                 );

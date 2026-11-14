@@ -3,7 +3,12 @@
   flex: 1;
   overflow: hidden;
   user-select: none;
-  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 子树一并禁选，避免按钮/标签在拖拽放大时被划中 */
+.photo-workspace * {
+  user-select: none !important;
 }
 
 .photo-sidebar {

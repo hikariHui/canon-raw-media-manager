@@ -3,17 +3,24 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Tag } from "animal-island-ui";
 import { MdBurstMode, MdPhoto } from "react-icons/md";
 import { usePhotoContext } from "./PhotoContext";
+import type { PhotoMeta } from "./groupBursts";
+import { orientationSwapsAxes } from "./orientationCss";
 import LazyThumb from "./LazyThumb";
 import "./BurstGroupList.css";
 
-const THUMB_SLOT = 70; // 64 + gap
+const THUMB_SLOT = 70; // 横拍长边 64 + gap；竖拍宽 43 更省
+const ROW_H_LANDSCAPE = 49; // 43 + gap 6
+const ROW_H_PORTRAIT = 70; // 64 + gap 6
 
-/** 估算单组高度：头 + 缩略图行 */
-function estimateGroupHeight(photoCount: number, cols: number) {
+/** 估算单组高度：有竖图按高行估，纯横图用矮行减少滚动跳动 */
+function estimateGroupHeight(photos: PhotoMeta[] | undefined, cols: number) {
+  const list = photos ?? [];
   const c = Math.max(1, cols);
-  const rows = Math.max(1, Math.ceil(photoCount / c));
+  const rows = Math.max(1, Math.ceil(Math.max(list.length, 1) / c));
+  const hasPortrait = list.some((p) => orientationSwapsAxes(p.orientation));
+  const rowH = hasPortrait ? ROW_H_PORTRAIT : ROW_H_LANDSCAPE;
   // 头 + padding(10*2) + 行高 + margin-bottom: 10
-  return 44 + 20 + rows * 56 + 10;
+  return 44 + 20 + rows * rowH + 10;
 }
 
 export default function BurstGroupList() {
@@ -51,8 +58,7 @@ export default function BurstGroupList() {
   const virtualizer = useVirtualizer({
     count: groups.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) =>
-      estimateGroupHeight(groups[i]?.photos.length ?? 1, thumbCols),
+    estimateSize: (i) => estimateGroupHeight(groups[i]?.photos, thumbCols),
     overscan: 6,
   });
 

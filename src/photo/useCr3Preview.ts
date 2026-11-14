@@ -13,10 +13,23 @@ type QueueItem = {
   reject: (err: unknown) => void;
 };
 
+/** 内存缓存存磁盘绝对路径（非 asset URL），读取时再 convert + 校验文件仍在 */
 const memoryCache = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
 /** 每 key 代数：prune 时递增，完成时核对，避免旧请求写回缓存 */
 const keyEpoch = new Map<string, number>();
+
+function diskToUrl(diskPath: string) {
+  return convertFileSrc(diskPath);
+}
+
+async function diskPathStillThere(diskPath: string): Promise<boolean> {
+  try {
+    return await invoke<boolean>("is_file_exists", { filePath: diskPath });
+  } catch {
+    return false;
+  }
+}
 
 const thumbQueue: QueueItem[] = [];
 const previewQueue: QueueItem[] = [];
@@ -175,6 +188,29 @@ export function cancelQueuedPreview(
   void runNext(kind);
 }
 
+/** 升 heavy 时作废 fast：踢队列 + bump epoch，避免在途 fast 完成后覆盖 heavy 回填 */
+export function abandonThumbQuality(path: string, quality: ThumbQuality) {
+  const key = cacheKey(path, "thumb", quality);
+  bumpEpoch(key);
+  inflight.delete(key);
+  memoryCache.delete(key);
+  cancelQueuedPreview(path, "thumb", quality);
+}
+
+function invokeErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object" && "message" in e) {
+    const m = (e as { message: unknown }).message;
+    if (typeof m === "string") return m;
+  }
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
+
 async function runNext(kind: PreviewKind) {
   const queue = queueFor(kind);
   const { active, max } = limits(kind);
@@ -203,9 +239,12 @@ async function runNext(kind: PreviewKind) {
       item.reject(new Error("file removed"));
       return;
     }
-    const url = convertFileSrc(cachedPath);
-    memoryCache.set(key, url);
-    item.resolve(url);
+    memoryCache.set(key, cachedPath);
+    // heavy 重建成功后同步进 fast，切走选中/虚拟列表 remount 仍显示重建结果
+    if (item.kind === "thumb" && item.quality === "heavy") {
+      memoryCache.set(cacheKey(item.path, "thumb", "fast"), cachedPath);
+    }
+    item.resolve(diskToUrl(cachedPath));
   } catch (e) {
     item.reject(e);
   } finally {
@@ -214,21 +253,25 @@ async function runNext(kind: PreviewKind) {
   }
 }
 
-export function loadCr3Preview(
+function enqueueCr3Preview(
   path: string,
   kind: PreviewKind,
-  quality: ThumbQuality = "fast",
+  quality: ThumbQuality,
 ): Promise<string> {
   const key = cacheKey(path, kind, quality);
-  const hit = memoryCache.get(key);
-  if (hit) return Promise.resolve(hit);
-
   const existing = inflight.get(key);
   if (existing) return existing;
 
   const epoch = keyEpoch.get(key) ?? 0;
   const promise = new Promise<string>((resolve, reject) => {
-    queueFor(kind).push({ path, kind, quality, epoch, resolve, reject });
+    const item: QueueItem = { path, kind, quality, epoch, resolve, reject };
+    const queue = queueFor(kind);
+    // 选中兜底 heavy 插队，避免排在成百上千 fast 缩略图后面
+    if (kind === "thumb" && quality === "heavy") {
+      queue.unshift(item);
+    } else {
+      queue.push(item);
+    }
     if (kind === "raw") reorderRawQueue();
     void runNext(kind);
   }).finally(() => {
@@ -241,6 +284,49 @@ export function loadCr3Preview(
   return promise;
 }
 
+export function loadCr3Preview(
+  path: string,
+  kind: PreviewKind,
+  quality: ThumbQuality = "fast",
+): Promise<string> {
+  const key = cacheKey(path, kind, quality);
+  const diskHit = memoryCache.get(key);
+  if (diskHit) {
+    return diskPathStillThere(diskHit).then((ok) => {
+      if (ok) return diskToUrl(diskHit);
+      // 磁盘缓存已被清掉（TTL/手动删），作废内存命中并重新抽取
+      memoryCache.delete(key);
+      bumpEpoch(key);
+      return enqueueCr3Preview(path, kind, quality);
+    });
+  }
+
+  return enqueueCr3Preview(path, kind, quality);
+}
+
+/** 同步窥视当前 quality 的磁盘缓存（不校验、不跨档回退 —— heavy 绝不能挂上已 404 的 fast URL） */
+function peekThumbUrl(
+  path: string,
+  kind: PreviewKind,
+  quality: ThumbQuality,
+): string | null {
+  const primary = memoryCache.get(cacheKey(path, kind, quality));
+  return primary ? diskToUrl(primary) : null;
+}
+
+/** <img> 404/解码失败时调用：清掉对应内存缓存，迫使重新抽取 */
+export function forgetThumbCache(path: string, quality: ThumbQuality = "fast") {
+  abandonThumbQuality(path, quality);
+}
+
+/** 对比区 / 预览图 404：清 preview 或 raw 内存缓存（不误伤另一档） */
+export function forgetPreviewCache(path: string, kind: "preview" | "raw") {
+  const key = cacheKey(path, kind);
+  memoryCache.delete(key);
+  bumpEpoch(key);
+  inflight.delete(key);
+}
+
 /** 视口内懒加载 CR3 预览 URL */
 export function useCr3Preview(
   path: string | undefined,
@@ -249,7 +335,7 @@ export function useCr3Preview(
   quality: ThumbQuality = "fast",
 ) {
   const [url, setUrl] = useState<string | null>(() =>
-    path ? (memoryCache.get(cacheKey(path, kind, quality)) ?? null) : null,
+    path ? peekThumbUrl(path, kind, quality) : null,
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -273,35 +359,38 @@ export function useCr3Preview(
       // 作废进行中的 UI 回写，并从等待队列剔除（不占坑）
       genRef.current += 1;
       if (path) cancelQueuedPreview(path, kind, quality);
+      // thumb 离屏不挂未校验 peek，避免陈旧路径进视口前闪裂图
       setUrl(
-        path ? (memoryCache.get(cacheKey(path, kind, quality)) ?? null) : null,
+        path && kind !== "thumb" ? peekThumbUrl(path, kind, quality) : null,
       );
       setLoading(false);
-      return;
-    }
-    const hit = memoryCache.get(cacheKey(path, kind, quality));
-    if (hit) {
-      setUrl(hit);
-      setLoading(false);
-      setError(false);
-      setErrorMessage(null);
       return;
     }
     const gen = ++genRef.current;
     setLoading(true);
     setError(false);
     setErrorMessage(null);
+    // 缩略图加载中不要先挂旧 URL：磁盘已删/404 时会闪裂图再回「无预览」
+    if (kind === "thumb") {
+      setUrl(null);
+    } else {
+      const fallback = peekThumbUrl(path, kind, quality);
+      if (fallback) setUrl(fallback);
+    }
     loadCr3Preview(path, kind, quality)
       .then((u) => {
         if (genRef.current !== gen) return;
         setUrl(u);
         setLoading(false);
+        setError(false);
+        setErrorMessage(null);
       })
       .catch((e) => {
         if (genRef.current !== gen) return;
-        const msg = e instanceof Error ? e.message : String(e);
-        // 文件已删：停
+        const msg = invokeErrorMessage(e);
+        // 文件已删：清 url，避免对比区残留旧 asset
         if (msg.includes("file removed")) {
+          setUrl(null);
           setLoading(false);
           setError(false);
           setErrorMessage(null);
@@ -321,11 +410,19 @@ export function useCr3Preview(
         // 仅清内存，勿再 notify listeners（避免失败重试死循环）
         memoryCache.delete(cacheKey(path, kind, quality));
         bumpEpoch(cacheKey(path, kind, quality));
+        // 必须清 url：否则对比区 `url ? 裂图 : error` 会永远走裂图
+        setUrl(null);
         setError(true);
         setErrorMessage(msg);
         setLoading(false);
-        console.warn("CR3 preview failed", path, kind, quality, e);
+        console.warn("CR3 preview failed", path, kind, quality, msg, e);
       });
+
+    // 仅在卸载 / 换 path·kind·quality 时作废旧 gen；不要在 cleanup 里 cancel
+    // 当前请求——否则选中升 heavy / 滚动 IO 抖动会把正在跑的重建直接踢掉
+    return () => {
+      genRef.current += 1;
+    };
   }, [path, kind, enabled, quality, reloadToken]);
 
   const retry = () => setReloadToken((n) => n + 1);

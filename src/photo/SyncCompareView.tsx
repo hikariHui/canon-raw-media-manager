@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Skeleton } from "animal-island-ui";
 import { MdStar } from "react-icons/md";
 import { MAX_COMPARE, usePhotoContext } from "./PhotoContext";
-import { setRawPreviewPriority, useCr3Preview } from "./useCr3Preview";
+import {
+  forgetPreviewCache,
+  setRawPreviewPriority,
+  useCr3Preview,
+} from "./useCr3Preview";
 import { orientationCss, orientationSwapsAxes } from "./orientationCss";
 import "./SyncCompareView.css";
 
@@ -35,6 +39,13 @@ function ComparePane({
   const jpeg = useCr3Preview(path, "preview", true);
   /** RAW 就绪后默认用 RAW；点标签可切回 JPG（切 JPG 时不占 RAW 槽） */
   const [preferRaw, setPreferRaw] = useState(true);
+  /** asset URL 404/解码失败：挡裂图；每种源最多自动重抽一次 */
+  const [imgBroken, setImgBroken] = useState(false);
+  /** 同 asset URL 重抽成功后强制 remount <img>，否则浏览器不重新请求 */
+  const [imgEpoch, setImgEpoch] = useState(0);
+  const imgRetryUsedRef = useRef(false);
+  /** onError 已发起 retry，等 loading 结束后再决定是否恢复显示 */
+  const pendingImgRecoverRef = useRef(false);
   useEffect(() => {
     if (useRaw) setPreferRaw(true);
   }, [useRaw, path]);
@@ -45,10 +56,42 @@ function ComparePane({
   }, [path, wantRaw, onReportWantRaw]);
   const raw = useCr3Preview(path, "raw", wantRaw);
   const showingRaw = Boolean(wantRaw && raw.url);
-  const url = showingRaw ? raw.url! : jpeg.url;
+  const sourceUrl = showingRaw ? raw.url! : jpeg.url;
+  const url = sourceUrl && !imgBroken ? sourceUrl : null;
   const pendingRaw = wantRaw && raw.loading && !raw.url;
-  const loading = !url && (jpeg.loading || pendingRaw);
-  const error = !url && !pendingRaw && jpeg.error && !(wantRaw && raw.loading);
+  const loading = !url && (jpeg.loading || pendingRaw || raw.loading);
+  const error =
+    !url && !loading && (jpeg.error || (wantRaw && raw.error) || imgBroken);
+
+  useEffect(() => {
+    setImgBroken(false);
+    setImgEpoch(0);
+    imgRetryUsedRef.current = false;
+    pendingImgRecoverRef.current = false;
+  }, [path, showingRaw]);
+
+  // 已卡在 broken 时若 hook 又开始加载（invalidate / file-change），接入 recover，并重置 onError 预算
+  useEffect(() => {
+    if (!imgBroken) return;
+    const loadingNow = showingRaw ? raw.loading : jpeg.loading;
+    if (!loadingNow) return;
+    if (pendingImgRecoverRef.current) return; // 已在 onError→retry 周期内
+    pendingImgRecoverRef.current = true;
+    imgRetryUsedRef.current = false;
+  }, [imgBroken, jpeg.loading, raw.loading, showingRaw]);
+
+  // pending 拉取结束：即使 URL 字符串不变也清 broken + bump epoch
+  useEffect(() => {
+    if (!pendingImgRecoverRef.current) return;
+    const loadingNow = showingRaw ? raw.loading : jpeg.loading;
+    if (loadingNow) return;
+    pendingImgRecoverRef.current = false;
+    const activeUrl = showingRaw ? raw.url : jpeg.url;
+    if (activeUrl) {
+      setImgBroken(false);
+      setImgEpoch((n) => n + 1);
+    }
+  }, [jpeg.loading, raw.loading, jpeg.url, raw.url, showingRaw]);
   const name = path.split(/[/\\]/).pop() ?? path;
   const kept = allowKeep && keepPaths.has(path);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -210,12 +253,26 @@ function ComparePane({
             }}
           >
             <img
+              key={`${showingRaw ? "raw" : "jpg"}-${imgEpoch}`}
               ref={imgRef}
               src={url}
               alt={name}
               draggable={false}
               style={imgLayoutStyle}
               onLoad={measureFit}
+              onError={() => {
+                setImgBroken(true);
+                if (showingRaw) {
+                  forgetPreviewCache(path, "raw");
+                } else {
+                  forgetPreviewCache(path, "preview");
+                }
+                if (imgRetryUsedRef.current) return;
+                imgRetryUsedRef.current = true;
+                pendingImgRecoverRef.current = true;
+                if (showingRaw) raw.retry();
+                else jpeg.retry();
+              }}
             />
           </div>
         ) : loading ? (
