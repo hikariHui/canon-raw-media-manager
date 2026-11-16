@@ -74,7 +74,8 @@ function useShortcutFocusGate() {
 export default function OperationTips() {
   const { mode } = useAppMode();
   const { curCrmFile, curProxyFileUrl } = useAppContext();
-  const { selectedPaths, keepPaths, comparePaths, photos } = usePhotoContext();
+  const { selectedPaths, keepPaths, comparePaths, photos, activeGroup } =
+    usePhotoContext();
   const [isFocused, setIsFocused] = useState(document.hasFocus());
   const gate = useShortcutFocusGate();
 
@@ -115,7 +116,11 @@ export default function OperationTips() {
   const videoSeekOk = !gate.dialog && !gate.typing && !!curProxyFileUrl;
   const photoInteractOk = !photoBlocked && photos.length > 0;
   const photoDblOk = photoInteractOk;
-  const photoZoomOk = photoInteractOk;
+  const photoZoomOk =
+    !photoBlocked &&
+    (comparePaths.length > 0 ||
+      selectedPaths.size > 0 ||
+      (activeGroup?.photos.length ?? 0) > 0);
   const photoKeepClickOk = !photoBlocked && comparePaths.length > 0;
 
   if (!isFocused) {
@@ -166,7 +171,7 @@ export default function OperationTips() {
             active={photoZoomOk}
             title={photoBlocked ? blockedReason : "暂无照片"}
           >
-            滚轮缩放 · 拖移
+            双指平移 · 捏合/⌘滚轮缩放 · 按住拖移
           </TipTag>
           <TipTag
             active={photoEscOk}

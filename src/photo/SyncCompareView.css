@@ -19,6 +19,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  touch-action: none;
   cursor: pointer;
   background: #2a241c;
   border: 2px solid transparent;

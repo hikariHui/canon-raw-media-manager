@@ -34,8 +34,13 @@ function ComparePane({
   /** 上报是否仍要拉 RAW（切 JPG 时为 false，便于踢出优先级） */
   onReportWantRaw: (path: string, want: boolean) => void;
 }) {
-  const { syncViewport, setSyncViewport, keepPaths, fitNativeZoom } =
-    usePhotoContext();
+  const {
+    syncViewport,
+    setSyncViewport,
+    keepPaths,
+    fitNativeZoom,
+    resetSyncViewport,
+  } = usePhotoContext();
   const jpeg = useCr3Preview(path, "preview", true);
   /** RAW 就绪后默认用 RAW；点标签可切回 JPG（切 JPG 时不占 RAW 槽） */
   const [preferRaw, setPreferRaw] = useState(true);
@@ -103,7 +108,6 @@ function ComparePane({
     vy: number;
     moved: boolean;
   } | null>(null);
-
   const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
   // 与父级 nativeZoom 一致：适应未就绪时为 0，不用假 1
   const effectiveScale =
@@ -157,11 +161,6 @@ function ComparePane({
   return (
     <div
       className={`compare-pane ${kept ? "is-keep" : ""}`}
-      title={
-        allowKeep
-          ? "点击勾选/取消保留"
-          : "预览中，双击缩略图加入对比后再勾选保留"
-      }
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.stopPropagation();
@@ -182,7 +181,8 @@ function ComparePane({
         if (!g.moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
           g.moved = true;
         }
-        if (g.moved) {
+        // fit 未就绪时不平移
+        if (g.moved && (syncViewport.scale > 0 || (fitNativeZoom ?? 0) > 0)) {
           setSyncViewport((v) => ({
             ...v,
             x: g.vx + dx,
@@ -196,6 +196,13 @@ function ComparePane({
         gestureRef.current = null;
         if (!g || g.moved || e.button !== 0 || !allowKeep) return;
         onToggleKeep(path);
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        resetSyncViewport();
+      }}
+      onPointerCancel={() => {
+        gestureRef.current = null;
       }}
     >
       <div className="compare-pane-label">
@@ -211,6 +218,7 @@ function ComparePane({
                   : "当前 JPG 预览，点击切回 RAW 细节"
               }
               onPointerDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 setPreferRaw((v) => !v);
@@ -451,31 +459,178 @@ export default function SyncCompareView() {
   }, []);
 
   const viewRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef(syncViewport);
+  const fitZoomRef = useRef(fitNativeZoom);
+  viewportRef.current = syncViewport;
+  fitZoomRef.current = fitNativeZoom;
 
   useEffect(() => {
     const el = viewRef.current;
     if (!el) return;
+
+    const resolveBase = (scale: number) => {
+      if (scale > 0) return scale;
+      const fit = fitZoomRef.current;
+      return fit && fit > 0 ? fit : 0;
+    };
+
+    const anchorOffset = (
+      clientX: number,
+      clientY: number,
+      target: EventTarget | null,
+    ) => {
+      const anchorEl =
+        (target as HTMLElement | null)?.closest?.(".compare-pane-viewport") ??
+        el;
+      const rect = anchorEl.getBoundingClientRect();
+      return {
+        ox: clientX - (rect.left + rect.width / 2),
+        oy: clientY - (rect.top + rect.height / 2),
+      };
+    };
+
+    // Safari/WKWebView 捏合走 GestureEvent；若同时冒出 ctrl+wheel，用此标记避免双倍缩放
+    let pinching = false;
+    /** gestureend 后短暂屏蔽 ctrl+wheel，避免 WKWebView 合成残留再跳一档 */
+    let wheelZoomCooldownUntil = 0;
+    let cooldownTimer = 0;
+    const PINCH_WHEEL_COOLDOWN_MS = 120;
+    const pinch = {
+      startScale: 0,
+      startX: 0,
+      startY: 0,
+      ox: 0,
+      oy: 0,
+    };
+
+    const pointInView = (clientX: number, clientY: number) => {
+      const rect = el.getBoundingClientRect();
+      return (
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
+      );
+    };
+
+    const eventInView = (target: EventTarget | null) => {
+      if (!(target instanceof Node)) return false;
+      return el === target || el.contains(target);
+    };
+
+    const endPinch = () => {
+      if (!pinching) return;
+      pinching = false;
+      pinch.startScale = 0;
+      wheelZoomCooldownUntil = performance.now() + PINCH_WHEEL_COOLDOWN_MS;
+      window.clearTimeout(cooldownTimer);
+      cooldownTimer = window.setTimeout(() => {
+        wheelZoomCooldownUntil = 0;
+      }, PINCH_WHEEL_COOLDOWN_MS);
+    };
+
     const onWheel = (e: WheelEvent) => {
+      if (!eventInView(e.target) && !pointInView(e.clientX, e.clientY)) return;
       e.preventDefault();
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      setSyncViewport((v) => {
-        const base =
-          v.scale > 0
-            ? v.scale
-            : fitNativeZoom && fitNativeZoom > 0
-              ? fitNativeZoom
-              : 0;
-        // fit 未就绪时不抢跑写成 0.9/1.1，否则 applyMinFit 无法再写入适应倍率
-        if (!(base > 0)) return v;
-        return {
-          ...v,
-          scale: Math.min(MAX_SCALE, Math.max(MIN_SCALE, base * delta)),
-        };
+
+      const zoomBlocked =
+        pinching || performance.now() < wheelZoomCooldownUntil;
+
+      // Chrome 捏合 / Ctrl·Cmd+滚轮（Safari 触控板捏合优先走 gesture*）
+      if (e.ctrlKey || e.metaKey) {
+        if (zoomBlocked) return;
+        const clamped = Math.max(-10, Math.min(10, e.deltaY));
+        const factor = Math.pow(2, -clamped * 0.01);
+        const { ox, oy } = anchorOffset(e.clientX, e.clientY, e.target);
+        setSyncViewport((v) => {
+          const base = resolveBase(v.scale);
+          if (!(base > 0)) return v;
+          const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, base * factor));
+          const ratio = next / base;
+          return {
+            scale: next,
+            x: ox - (ox - v.x) * ratio,
+            y: oy - (oy - v.y) * ratio,
+          };
+        });
+        return;
+      }
+
+      // fit 未就绪时不平移，避免图片出现后偏移
+      if (!(resolveBase(viewportRef.current.scale) > 0)) return;
+
+      setSyncViewport((v) => ({
+        ...v,
+        x: v.x - e.deltaX,
+        y: v.y - e.deltaY,
+      }));
+    };
+
+    // 挂 window：WKWebView 上 GestureEvent 挂元素时常收不到（Tauri 惯例）
+    const onGestureStart = (e: Event) => {
+      const ge = e as UIEvent & { clientX: number; clientY: number };
+      // WKWebView 上 target 常为 document，不能只靠 contains
+      if (!eventInView(e.target) && !pointInView(ge.clientX, ge.clientY)) {
+        return;
+      }
+      // 始终挡住 WebView 整页捏合；fit 未就绪则不进 pinching（不挡 Ctrl/Cmd+滚轮）
+      e.preventDefault();
+      const v = viewportRef.current;
+      const base = resolveBase(v.scale);
+      if (!(base > 0)) {
+        pinch.startScale = 0;
+        return;
+      }
+      pinching = true;
+      const { ox, oy } = anchorOffset(ge.clientX, ge.clientY, e.target);
+      pinch.startScale = base;
+      pinch.startX = v.x;
+      pinch.startY = v.y;
+      pinch.ox = ox;
+      pinch.oy = oy;
+    };
+
+    const onGestureChange = (e: Event) => {
+      if (!pinching) return;
+      e.preventDefault();
+      const ge = e as UIEvent & { scale: number };
+      if (!(pinch.startScale > 0) || !(ge.scale > 0)) return;
+      const next = Math.min(
+        MAX_SCALE,
+        Math.max(MIN_SCALE, pinch.startScale * ge.scale),
+      );
+      const ratio = next / pinch.startScale;
+      setSyncViewport({
+        scale: next,
+        x: pinch.ox - (pinch.ox - pinch.startX) * ratio,
+        y: pinch.oy - (pinch.oy - pinch.startY) * ratio,
       });
     };
+
+    const onGestureEnd = (e: Event) => {
+      if (!pinching) return;
+      e.preventDefault();
+      endPinch();
+    };
+
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [setSyncViewport, fitNativeZoom, pathsKey]);
+    window.addEventListener("gesturestart", onGestureStart, {
+      passive: false,
+    });
+    window.addEventListener("gesturechange", onGestureChange, {
+      passive: false,
+    });
+    window.addEventListener("gestureend", onGestureEnd, { passive: false });
+    window.addEventListener("gesturecancel", onGestureEnd, { passive: false });
+    return () => {
+      window.clearTimeout(cooldownTimer);
+      el.removeEventListener("wheel", onWheel);
+      window.removeEventListener("gesturestart", onGestureStart);
+      window.removeEventListener("gesturechange", onGestureChange);
+      window.removeEventListener("gestureend", onGestureEnd);
+      window.removeEventListener("gesturecancel", onGestureEnd);
+    };
+  }, [setSyncViewport, pathsKey]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -495,6 +650,7 @@ export default function SyncCompareView() {
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
       if (!dragRef.current) return;
+      if (!(syncViewport.scale > 0 || (fitNativeZoom ?? 0) > 0)) return;
       const dx = e.clientX - dragRef.current.x;
       const dy = e.clientY - dragRef.current.y;
       const { vx, vy } = dragRef.current;
@@ -504,10 +660,14 @@ export default function SyncCompareView() {
         y: vy + dy,
       }));
     },
-    [setSyncViewport],
+    [setSyncViewport, syncViewport.scale, fitNativeZoom],
   );
 
   const onPointerUp = useCallback(() => {
+    dragRef.current = null;
+  }, []);
+
+  const onPointerCancel = useCallback(() => {
     dragRef.current = null;
   }, []);
 
@@ -529,6 +689,7 @@ export default function SyncCompareView() {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onDoubleClick={resetSyncViewport}
       style={{
         gridTemplateColumns: `repeat(${cols}, 1fr)`,
