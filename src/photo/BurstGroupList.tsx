@@ -177,10 +177,18 @@ export default function BurstGroupList() {
                   width: "100%",
                   transform: `translateY(${vi.start}px)`,
                 }}
-                onClick={() => {
+                onClick={(e) => {
                   setActiveGroupId(group.id);
                   const first = group.photos[0];
-                  if (first) selectOnly(first.path);
+                  if (!first) return;
+                  // 与缩略图一致：单张组点标题/空白也能 ⌘/⇧ 多选
+                  if (e.metaKey || e.ctrlKey) {
+                    toggleSelect(first.path);
+                  } else if (e.shiftKey) {
+                    selectRangeTo(first.path);
+                  } else {
+                    selectOnly(first.path);
+                  }
                 }}
               >
                 <div className="burst-group-head">
